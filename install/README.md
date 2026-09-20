@@ -2,6 +2,60 @@
 
 本目录用于把 SundayNoteAgent 安装到私人 Obsidian vault。
 
+## Monitor（可选）
+
+```bash
+# 只安装/更新 Monitor，不刷新 Vault 的其他规则、模板或文档
+bash SundayNoteAgent/install/install.sh --vault-root . --with-monitor --monitor-only
+
+# 卸载自己的 Hook、桌面入口和托管副本，保留日志
+bash SundayNoteAgent/install/install.sh --vault-root . --without-monitor --monitor-only
+```
+
+依赖：Linux、Python 3.11+、支持 `--ephemeral`、`--ignore-user-config` 和 permission profile 的 Codex CLI、`zenity`、`notify-send`、`rg`，以及 `xclip` / `xsel` / `wl-copy` 之一。安装器只检查，不自动安装依赖。参考验证 CLI 版本为 0.153.2。
+
+安装会导出 Monitor Skill 和脚本、合并用户级 `hooks.json`、启用 Hooks，并创建“Monitor 建议”桌面入口。已有 inline `Stop` / `UserPromptSubmit` 配置会阻止安装，避免同层配置互相遮蔽。安装后必须通过 Codex `/hooks` 审阅信任 Hook；已有桌面会话需要重新加载。不会绕过信任检查。一个用户配置绑定一个 Vault；不同设备分别安装验证。
+
+`UserPromptSubmit` 只保存当前轮次的请求；`Stop` 快速入队，由后台执行器调用 Luna。全局只有一个执行器；没有定时器、常驻模型或新增聊天任务。结束或中断的父会话不会终止已经启动的 Monitor。
+
+只监控带有非空 `transcript_path` 的可追溯持久会话。缺失、null 或空白路径的事件直接跳过，不登记、不调用 Luna、不通知；这也排除了当前桌面的临时侧对话，但不是精确的侧对话类型识别。入口不检查文件是否已存在，避免落盘延迟误过滤；已有历史日志不改写。
+
+桌面 Hook 不一定继承终端代理。需要代理时，用安装器的 `--proxy-url http://127.0.0.1:<端口>` 设置：
+
+```bash
+python3 SundayNoteAgent/install/configure_monitor.py --vault-root /path/to/vault --proxy-url 'http://127.0.0.1:<端口>'
+```
+
+代理只写入 Vault 的 `.logs/codex/config.json`，重新安装会保留；传空字符串清除。它用于 Codex 服务连接，不开放模型命令的网络权限。
+
+Skill 先阅读本轮对话并整理历史摘要；明确没有实质改动或信息增量时直接结束。很可能有改动、新决定、结论、失败或修复时，主动读取涉及对象及关联实现、测试、设计与知识，不要求先发现异常。代码、配置或工具结构改动包含冗余检查：有具体依据的精简候选可以先提议并标明风险，由用户决定是否采用。读取不限制文件数或扩展轮次，答案充分或不再获得有效信息时停止；约 64K tokens 是上下文软上限，不是读取目标。语义判断留在 Skill，不用脚本关键词预判；每轮记录与建议推送分开，保持只读。
+
+运行控制（在 Vault 根目录执行）：
+
+```bash
+python3 .sunday-note-agent/monitor/monitor.py --config .logs/codex/config.json status
+python3 .sunday-note-agent/monitor/monitor.py --config .logs/codex/config.json pause
+python3 .sunday-note-agent/monitor/monitor.py --config .logs/codex/config.json resume
+python3 .sunday-note-agent/monitor/monitor.py --config .logs/codex/config.json retry
+python3 .sunday-note-agent/monitor/monitor.py --config .logs/codex/config.json panel
+```
+
+暂停不强杀正在完成的检查；后续事件不采集。认证、沙箱、模型不可用、网络或额度不足时保留队列并暂停处理，后续会话事件或手动重试再次尝试，不自动转 API 或升级模型。单轮超时、一般执行失败或非法输出只记录失败及来源，清除该轮暂存原文并继续其他轮次；不伪造摘要，也不自动重复消耗额度。运行配置使用当前 ChatGPT 登录；不复制凭据。
+
+完全重复的 Hook 不更新轮次版本，也不重跑检查。没有收到 `Stop` 的输入，在同一会话下一轮提交时，或超过 24 小时后的下一次事件到来时清理，只保留未完成登记与来源。没有定时清理进程，因此没有后续事件时不会主动清理。
+
+每轮 Hook 和日志登记保持开启，无建议也记录。日志只进入 `.logs/codex/`：会话 JSONL 以原会话历史为主，简记用户请求与决定、主任务声明、原会话证据和明确遗留问题；不保存 Luna 的推测或后来检查到的现状作为历史事实。摘要仍是模型整理，保留来源索引，不自动写入 Wiki 或回注主会话。findings 单独保存达到推送门槛的建议和点击结果；queue 暂存待处理请求/回复，完成后移除原文。既有日志不改写，旧格式的分析字段不再用于近期摘要路由。该目录包含私人运行记录，不提交到工具仓库。
+
+模型使用继承只读策略、仅 scratch 可写的 permission profile；外部命令网络关闭，网页搜索使用 Codex 工具。每次启动先运行无损沙箱探针。全部模型输出均经过结构检查；文件证据需匹配短原文，并记录归档时内容 hash。网页阅读仍是模型声明，文件匹配不能替代领域正确性判断。Monitor 不承担正式 Review 或独立验收。
+
+默认静默，仅在有新证据、具体影响与可行动价值，且引用校验通过的非重复建议时通知；不是每轮回复都推送。证据不足的疑问、历史归因不清和一般润色不制造待办。语义门槛由 Skill 判断，引用与重复检查由脚本负责，不增加模型审核链。通知点击后打开单实例 Zenity 面板；不支持通知动作时从应用菜单或 `panel` 打开。选择、复制、忽略和暂存只改变 Monitor 日志，不执行仓库修改。文件依据以文本打开，不执行本地脚本。当前只覆盖本机桌面与 CLI；pet、远端主机和其他系统未接入。
+
+通知只显示短标题；面板默认展示简短摘要和处理选项，完整说明与证据通过“展开完整内容”查看。点选只保存意向，不自动复制；随后点击“复制完整处理指令”，复制未截断的说明、证据、建议和已选方案，供用户交给主 Agent。
+
+实现借鉴 [memsearch](https://github.com/zilliztech/memsearch/blob/main/docs/platforms/codex/how-it-works.md) 的隔离调用、[codex-observational-memory](https://github.com/sovorn-c/codex-observational-memory) 的来源索引和 [honcho-codex](https://github.com/rafachavantes/honcho-codex) 的按轮采集，不依赖这些服务。Hook 契约以 [Codex 官方文档](https://learn.chatgpt.com/docs/hooks) 为准。
+
+Monitor 默认使用 `gpt-5.6-luna` / `xhigh`，每轮硬上限 10 分钟。优先检查直接涉及材料和一跳关联来源，疑问已解决即停止；不会为凑建议重跑主任务。需要核对其他代码仓库时，可在本地 `.logs/codex/config.json` 的 `reference_roots` 数组中列出明确目录；它只限定检索指导和可接受的文件证据，不是操作系统级读取隔离。不要填用户主目录或文件系统根目录。未配置时仅接受当前项目和 Vault 的文件引用，引用必须是连续原文。
+
 同一脚本同时用于首次安装和更新：补建缺失的 vault 骨架和本地基线文件，并用当前 checkout 覆盖安装器托管内容。它不移动、重命名或整理已有个人内容，也不自动执行 Git 操作。
 
 安装器设置工具入口和本地默认配置：

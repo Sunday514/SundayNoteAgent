@@ -119,6 +119,18 @@ tests/                    # 脱敏 fixture 和统一回归入口
 
 `templates/` 保存 Daily、Weekly 和 month pack 的最小结构契约；Daily 模板只在缺失时创建，Weekly 和 month pack 模板由安装器刷新。`config/obsidian/` 只保存 Calendar 和 QuickAdd 的最小项目字段，不包含插件启用列表、workspace、设备路径、环境变量、代理、sessions 或权限运行状态。
 
+## Monitor（可选）
+
+Monitor 在本机任意 Codex 主会话每轮回复后，用订阅内的 `gpt-5.6-luna` 做只读关联检查。每轮登记，只有信息增量才写摘要，有可行动发现才通知。建议可在原生面板中复制、暂存或点选；不会修改项目、Wiki 或自动发送到其他会话。
+
+```bash
+bash SundayNoteAgent/install/install.sh --vault-root . --with-monitor --monitor-only
+```
+
+安装后在 Codex `/hooks` 中审阅并信任两个 Hook；应用菜单打开 **Monitor 建议**。日志、建议及状态集中在 `.logs/codex/`。需要 Linux、Python 3.11+、Codex CLI、Zenity、notify-send、rg 和剪贴板工具。只使用 ChatGPT 订阅登录，不回退 API 或其他模型。
+
+详见 [Monitor 安装和使用](install/README.md#monitor可选)。
+
 ## 相关入口
 
 - [安装器说明](install/README.md)

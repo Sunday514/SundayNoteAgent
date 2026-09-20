@@ -13,6 +13,7 @@ bash "$ROOT/tests/test_install.sh"
 node "$ROOT/tests/test_rollup.js"
 python "$ROOT/tests/test_skills.py"
 python "$ROOT/tests/test_query.py"
+python "$ROOT/tests/test_monitor.py"
 python "$ROOT/tests/test_python_tools.py"
 python "$ROOT/tests/test_paper_summarizer.py"
 
