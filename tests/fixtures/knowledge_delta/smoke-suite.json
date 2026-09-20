@@ -1,0 +1,44 @@
+{
+  "version": 2,
+  "suite_id": "smoke",
+  "web": "live",
+  "scenarios": [
+    {
+      "id": "query-topic",
+      "role": "target",
+      "kind": "query",
+      "turns": [
+        "结合已有记录，主题甲当前最重要的边界是什么？",
+        "再用一句话说明这条边界会怎样改变选择。"
+      ],
+      "intent": "检验系统是否使用主题甲的稳定边界。",
+      "expected_delta": "回答应指出条件乙不成立时不能外推。",
+      "oracle_sources": [
+        "30_知识库/主题甲.md"
+      ]
+    },
+    {
+      "id": "ingest-no-delta",
+      "role": "negative_control",
+      "kind": "ingest",
+      "ingest_turns": [
+        "把这份主题甲材料中有长期价值的内容沉淀进知识库。"
+      ],
+      "reuse_turns": [
+        "主题甲能否在条件乙不成立时继续外推？"
+      ],
+      "write_authorization_turn": 1,
+      "intent": "现有 Wiki 已承接材料，不应制造正文增量。",
+      "expected_delta": "应拒绝重复写入并保持后续回答正确。",
+      "oracle_before_sources": [
+        "30_知识库/主题甲.md"
+      ],
+      "candidate_sources": [
+        "10_原始材料/主题甲材料.md"
+      ],
+      "write_scope": [
+        "30_知识库"
+      ]
+    }
+  ]
+}

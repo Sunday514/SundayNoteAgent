@@ -5,3 +5,5 @@
 !.agents/skills/skill-validation/SKILL.md
 .codex/
 .claude/
+__pycache__/
+*.py[cod]

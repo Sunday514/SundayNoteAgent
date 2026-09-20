@@ -115,6 +115,7 @@ migration/                # 可复用知识库迁移辅助工具
 skills/                   # Codex / agent skills
 templates/                # 无具体条目的 Routine 最小模板
 tests/                    # 脱敏 fixture 和统一回归入口
+validation/               # 仅供开发使用的隔离诊断 CLI
 ```
 
 `templates/` 保存 Daily、Weekly 和 month pack 的最小结构契约；Daily 模板只在缺失时创建，Weekly 和 month pack 模板由安装器刷新。`config/obsidian/` 只保存 Calendar 和 QuickAdd 的最小项目字段，不包含插件启用列表、workspace、设备路径、环境变量、代理、sessions 或权限运行状态。
@@ -145,6 +146,20 @@ bash tests/run.sh
 ```
 
 检查只使用 Bash、Node 和 Python 标准运行时，在临时目录中生成脱敏 fixture，验证核心 skill、安装导出、Query/Lint 脚本和 QuickAdd，不读取父 vault。
+
+## 知识增量诊断
+
+`validation/knowledge_delta.py` 用冻结 suite 构造 G / O / S 隔离工作区，并分阶段生成候选、两阶段匿名 Judge 包和归因报告。`prepare` 会核对当前仓库与 vault 中四个基础 Skill 的身份；不一致时停止运行。运行目录必须位于 `/tmp`；仓库只附带脱敏 smoke fixture，不包含真实场景或个人来源。
+
+```bash
+python validation/knowledge_delta.py prepare --suite SUITE.json --vault-root VAULT --run-dir /tmp/kdi-run
+python validation/knowledge_delta.py run --run-dir /tmp/kdi-run --model MODEL --dry-run
+python validation/knowledge_delta.py judge --run-dir /tmp/kdi-run --model MODEL --dry-run
+python validation/knowledge_delta.py report --run-dir /tmp/kdi-run
+python validation/knowledge_delta.py cleanup --run-dir /tmp/kdi-run --confirm-suite-id SUITE_ID
+```
+
+suite version 2 的 Ingest 场景必须声明 `write_authorization_turn`，复用追问必须是不依赖其他候选对话的完整问题。Judge 先在看不到组别映射的情况下冻结候选评分，再读取阶段映射进行 G / O / S 归因；候选行为失败与实验协议失败分别记录。`--dry-run` 只生成工作区和调用计划。移除该参数会调用模型和实时 web，实际诊断前必须先检查冻结输入与隔离条件。`cleanup` 仅删除 suite ID 明确匹配的 `/tmp` 诊断目录。
 
 ## 隐私边界
 
