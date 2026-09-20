@@ -122,13 +122,13 @@ validation/               # 仅供开发使用的隔离诊断 CLI
 
 ## Monitor（可选）
 
-Monitor 在本机任意 Codex 主会话每轮回复后，用订阅内的 `gpt-5.6-luna` 做只读关联检查。每轮登记，只有信息增量才写摘要，有可行动发现才通知。建议可在原生面板中复制、暂存或点选；不会修改项目、Wiki 或自动发送到其他会话。
+Monitor 在配置项目范围内的 Codex 主会话每轮回复后，用订阅内的 `gpt-5.6-luna` 做只读关联检查和记录。有价值的新建议通过 `codex queue` 回传来源会话，要求只调用渲染工具，以紧凑 widget 展示摘要、可选方案和确认／忽略按钮，不限制来源会话模型。
 
 ```bash
 bash SundayNoteAgent/install/install.sh --vault-root . --with-monitor --monitor-only
 ```
 
-安装后在 Codex `/hooks` 中审阅并信任两个 Hook；应用菜单打开 **Monitor 建议**。日志、建议及状态集中在 `.logs/codex/`。需要 Linux、Python 3.11+、Codex CLI、Zenity、notify-send、rg 和剪贴板工具。只使用 ChatGPT 订阅登录，不回退 API 或其他模型。
+安装后在 Codex `/hooks` 中审阅并信任两个 Hook，并重新加载 MCP 工具。日志、建议及状态集中在 `.logs/codex/`。需要 Linux、Python 3.11+、Codex CLI 和 rg；反馈需要原生队列和支持 MCP Apps 的客户端。只使用 ChatGPT 订阅登录，不回退 API 或其他模型。
 
 详见 [Monitor 安装和使用](install/README.md#monitor可选)。
 

@@ -12,11 +12,19 @@ bash SundayNoteAgent/install/install.sh --vault-root . --with-monitor --monitor-
 bash SundayNoteAgent/install/install.sh --vault-root . --without-monitor --monitor-only
 ```
 
-依赖：Linux、Python 3.11+、支持 `--ephemeral`、`--ignore-user-config` 和 permission profile 的 Codex CLI、`zenity`、`notify-send`、`rg`，以及 `xclip` / `xsel` / `wl-copy` 之一。安装器只检查，不自动安装依赖。参考验证 CLI 版本为 0.153.2。
+依赖：Linux、Python 3.11+、支持 `--ephemeral`、`--ignore-user-config` 和 permission profile 的 Codex CLI，以及 `rg`。反馈还需要 `codex queue` 和支持 MCP Apps 的客户端。连接由原生队列命令处理，不额外读取 App Server 或检查来源模型。
 
-安装会导出 Monitor Skill 和脚本、合并用户级 `hooks.json`、启用 Hooks，并创建“Monitor 建议”桌面入口。已有 inline `Stop` / `UserPromptSubmit` 配置会阻止安装，避免同层配置互相遮蔽。安装后必须通过 Codex `/hooks` 审阅信任 Hook；已有桌面会话需要重新加载。不会绕过信任检查。一个用户配置绑定一个 Vault；不同设备分别安装验证。
+安装会导出 Monitor Skill、脚本和 widget，在用户级 `config.toml` 注册 `sunday_note_monitor` MCP 服务，合并 `hooks.json`、启用 Hooks，并清理旧弹窗脚本和桌面入口。其他 MCP 配置不变；未托管的同名服务会阻止安装。已有 inline `Stop` / `UserPromptSubmit` 配置会阻止安装，避免同层配置互相遮蔽。安装后必须通过 Codex `/hooks` 审阅信任 Hook，并重新加载客户端让来源会话获得渲染工具。不会绕过信任检查。一个用户配置绑定一个 Vault；不同设备分别安装验证。
 
 `UserPromptSubmit` 只保存当前轮次的请求；`Stop` 快速入队，由后台执行器调用 Luna。全局只有一个执行器；没有定时器、常驻模型或新增聊天任务。结束或中断的父会话不会终止已经启动的 Monitor。
+
+项目范围在 Vault 本地 `.logs/codex/config.json` 的 `project_roots` 数组管理，默认仅包含绑定的 Vault。修改该字段即可选择多个项目，例如：
+
+```json
+"project_roots": ["/path/to/vault", "/path/to/project"]
+```
+
+使用绝对目录路径，匹配会话 `cwd` 及其子目录，按符号链接解析后的真实路径判断；独立 worktree 需另行列入。空数组停止所有项目采集，缺少字段时仅监控 Vault。更新安装保留已有选择。配置在下一次事件或排队任务处理时生效，范围外事件不登记、不调用模型、不通知；已排队的范围外任务会被移除，正在执行的检查不强行终止，历史日志保留。`reference_roots` 只用于证据读取，不会启用项目监控。
 
 只监控带有非空 `transcript_path` 的可追溯持久会话。缺失、null 或空白路径的事件直接跳过，不登记、不调用 Luna、不通知；这也排除了当前桌面的临时侧对话，但不是精确的侧对话类型识别。入口不检查文件是否已存在，避免落盘延迟误过滤；已有历史日志不改写。
 
@@ -37,20 +45,21 @@ python3 .sunday-note-agent/monitor/monitor.py --config .logs/codex/config.json s
 python3 .sunday-note-agent/monitor/monitor.py --config .logs/codex/config.json pause
 python3 .sunday-note-agent/monitor/monitor.py --config .logs/codex/config.json resume
 python3 .sunday-note-agent/monitor/monitor.py --config .logs/codex/config.json retry
-python3 .sunday-note-agent/monitor/monitor.py --config .logs/codex/config.json panel
 ```
 
 暂停不强杀正在完成的检查；后续事件不采集。认证、沙箱、模型不可用、网络或额度不足时保留队列并暂停处理，后续会话事件或手动重试再次尝试，不自动转 API 或升级模型。单轮超时、一般执行失败或非法输出只记录失败及来源，清除该轮暂存原文并继续其他轮次；不伪造摘要，也不自动重复消耗额度。运行配置使用当前 ChatGPT 登录；不复制凭据。
 
 完全重复的 Hook 不更新轮次版本，也不重跑检查。没有收到 `Stop` 的输入，在同一会话下一轮提交时，或超过 24 小时后的下一次事件到来时清理，只保留未完成登记与来源。没有定时清理进程，因此没有后续事件时不会主动清理。
 
-每轮 Hook 和日志登记保持开启，无建议也记录。日志只进入 `.logs/codex/`：会话 JSONL 以原会话历史为主，简记用户请求与决定、主任务声明、原会话证据和明确遗留问题；不保存 Luna 的推测或后来检查到的现状作为历史事实。摘要仍是模型整理，保留来源索引，不自动写入 Wiki 或回注主会话。findings 单独保存达到推送门槛的建议和点击结果；queue 暂存待处理请求/回复，完成后移除原文。既有日志不改写，旧格式的分析字段不再用于近期摘要路由。该目录包含私人运行记录，不提交到工具仓库。
+范围内所有模型的会话统一分析和记录，无建议也登记。日志只进入 `.logs/codex/`：会话 JSONL 简记用户请求与决定、主任务声明、原会话证据和明确遗留问题；不保存 Luna 补查的推测作为原会话事实。findings 保存建议、完整证据和投递状态；queue 暂存待处理请求/回复，完成后移除原文。既有日志不改写，旧分析字段不再用于近期摘要路由。该目录包含私人运行记录，不提交到工具仓库。
 
 模型使用继承只读策略、仅 scratch 可写的 permission profile；外部命令网络关闭，网页搜索使用 Codex 工具。每次启动先运行无损沙箱探针。全部模型输出均经过结构检查；文件证据需匹配短原文，并记录归档时内容 hash。网页阅读仍是模型声明，文件匹配不能替代领域正确性判断。Monitor 不承担正式 Review 或独立验收。
 
-默认静默，仅在有新证据、具体影响与可行动价值，且引用校验通过的非重复建议时通知；不是每轮回复都推送。证据不足的疑问、历史归因不清和一般润色不制造待办。语义门槛由 Skill 判断，引用与重复检查由脚本负责，不增加模型审核链。通知点击后打开单实例 Zenity 面板；不支持通知动作时从应用菜单或 `panel` 打开。选择、复制、忽略和暂存只改变 Monitor 日志，不执行仓库修改。文件依据以文本打开，不执行本地脚本。当前只覆盖本机桌面与 CLI；pet、远端主机和其他系统未接入。
+仅在有价值、引用校验通过且未重复的内容产生后投递反馈，不检查来源会话模型。每轮最多一份反馈，其 ID 经 `codex queue --thread … --message …` 送回会话 A，不覆盖模型与权限。短指令要求 A 只调用 `render_monitor_feedback`，不分析、解释、提问或执行建议；工具不可用时仅说明无法显示面板。A 活跃时使用原生队列，不强行中断。提示词约束不是客户端强制执行保证。
 
-通知只显示短标题；面板默认展示简短摘要和处理选项，完整说明与证据通过“展开完整内容”查看。点选只保存意向，不自动复制；随后点击“复制完整处理指令”，复制未截断的说明、证据、建议和已选方案，供用户交给主 Agent。
+widget 仅显示一段简短摘要和至多一个决策，方案用紧凑单选列表展示。推荐、建议和背景是摘要中的可选参考内容，不按分类分栏，也不要求逐类覆盖。无决策时，确认仅记为已阅；有决策时，将确认的选择通过原生队列发回同一个 A，由 A 核实后执行。忽略只更新本地状态。处理成功后清空内容并请求宿主关闭 widget；外层工具历史是否保留由客户端决定。队列结果不明时保留待核实状态，不自动重发。面板操作工具仅向应用暴露，不向模型暴露。
+
+反馈轮次使用 `[SundayNote Monitor]` 标记，保持登记但不再次调用 Luna，防止循环；用户确认后的任务正常检查。`status` 显示反馈状态计数：`queued` 仅表示队列接受，不代表已渲染或已决定；`skipped_scope` 表示已移出范围，`failed` 表示未获投递成功确认，`sending` 表示可能在投递期间中断。失败不影响原始摘要，`retry` 仅重试分析队列。不另起 `resume`、修改聊天数据库或使用弹窗兜底。真实客户端的工具加载、渲染和关闭需在安装后验证。
 
 实现借鉴 [memsearch](https://github.com/zilliztech/memsearch/blob/main/docs/platforms/codex/how-it-works.md) 的隔离调用、[codex-observational-memory](https://github.com/sovorn-c/codex-observational-memory) 的来源索引和 [honcho-codex](https://github.com/rafachavantes/honcho-codex) 的按轮采集，不依赖这些服务。Hook 契约以 [Codex 官方文档](https://learn.chatgpt.com/docs/hooks) 为准。
 

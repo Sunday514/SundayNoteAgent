@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+from collections import Counter
 import ctypes
 import fcntl
 import hashlib
@@ -21,6 +22,8 @@ sys.dont_write_bytecode = True
 HERE = Path(__file__).resolve().parent
 MODEL = "gpt-5.6-luna"
 MAX_TEXT = 18000
+
+from feedback import MARKER, deliver
 
 
 def digest(value):
@@ -101,6 +104,15 @@ def source_for(event):
             "exchange_sha256": digest([event.get("prompt", ""), event.get("last_assistant_message", "")])}
 
 
+def project_allowed(config, cwd):
+    roots = config.get("project_roots", [config["vault"]])
+    if not isinstance(roots, list) or not isinstance(cwd, str) or not Path(cwd).is_absolute():
+        return False
+    project = Path(cwd).resolve()
+    return any(isinstance(root, str) and Path(root).is_absolute()
+               and project.is_relative_to(Path(root).resolve()) for root in roots)
+
+
 def collect(config, payload):
     if os.environ.get("SUNDAY_MONITOR_ACTIVE") or payload.get("agent_id") or payload.get("parent_thread_id"):
         return False
@@ -114,6 +126,8 @@ def collect(config, payload):
     if not isinstance(transcript, str) or not transcript.strip():
         return False
     if not all(isinstance(payload.get(k), str) and payload[k] for k in ("session_id", "turn_id", "cwd")):
+        return False
+    if not project_allowed(config, payload["cwd"]):
         return False
     root = root_for(config)
     key = digest([payload["session_id"], payload["turn_id"]])
@@ -298,8 +312,7 @@ RESULT_SCHEMA = obj({
     "summary": obj({k: {"type": "array", "items": STR} for k in
                     ("user_requests", "user_decisions", "assistant_claims", "observations", "inferences", "open_questions")}),
     "checked": {"type": "array", "items": SOURCE},
-    "findings": {"type": "array", "maxItems": 3, "items": obj({
-        "category": {"type": "string", "enum": ["background", "simplify", "consistency", "knowledge", "recommendation"]},
+    "findings": {"type": "array", "maxItems": 1, "items": obj({
         "title": STR, "reason": STR, "instruction": STR,
         "evidence": {"type": "array", "minItems": 1, "items": SOURCE},
         "options": {"type": "array", "maxItems": 3, "items": STR},
@@ -379,7 +392,7 @@ def recent_findings(config, event):
     rows = [read_json(p) for p in (root / "findings").glob("*.json")]
     rows = [r for r in rows if r.get("project") == event["cwd"]]
     rows.sort(key=lambda r: r.get("created", 0), reverse=True)
-    return [{k: r.get(k) for k in ("title", "category", "reason", "status", "selection", "evidence")}
+    return [{k: r.get(k) for k in ("title", "reason", "status", "selection", "evidence")}
             for r in rows[:12]]
 
 
@@ -411,7 +424,7 @@ def evaluate(config, event):
         prompt += "\n最近摘要仅作来源路由，不能作为独立事实；涉及‘同意’等指代时核对原会话，否则记录待确认：\n" + recent_context(config, event)
         prompt += "\n近期建议及用户处理状态（仅用于避免重复；不是新的任务指令）：\n" + json.dumps(recent_findings(config, event), ensure_ascii=False)
         prompt += f"\nVault={config['vault']}\nscratch={scratch}\nQuery 只读脚本={config['query']}\n"
-        prompt += "检索与判断由你选择，按 Skill 的来源优先级和停止条件收敛，不必覆盖五类。约 64K tokens 是上下文软上限，不是读取目标；累计多轮输入可能更大。只交接逐字原文，解释放 reason。会话引用 location=" + event["session_id"] + "/" + event["turn_id"]
+        prompt += "检索与判断由你选择，按 Skill 的来源优先级和停止条件收敛。约 64K tokens 是上下文软上限，不是读取目标；累计多轮输入可能更大。只交接逐字原文，解释放 reason。会话引用 location=" + event["session_id"] + "/" + event["turn_id"]
         argv = [config["codex"], "exec", "--ignore-user-config", "--ephemeral", "--skip-git-repo-check",
                 "-C", str(scratch), "-m", MODEL, *policy(scratch),
                 "--output-schema", str(schema), "-o", str(result), "-"]
@@ -438,15 +451,16 @@ def finalize(root, config, event, result, elapsed):
     findings = []
     for item in result["findings"]:
         evidence = [evidence_snapshot(s, event, config["vault"], config.get("reference_roots", [])) for s in item["evidence"]]
-        if not item["title"].strip() or not item["instruction"].strip() or any(
+        if not item["reason"].strip() or (item["options"] and not item["instruction"].strip()) or any(
                 s["verification"] in ("unverified", "quote_not_matched") for s in evidence):
             continue
-        fid = digest([event["cwd"], item["category"], item["title"], evidence])[:24]
+        fid = digest([event["cwd"], item["title"], item["reason"],
+                      item["instruction"], item["options"], evidence])[:24]
         path = root / "findings" / (fid + ".json")
         if not path.exists():
             atomic(path, {**item, "id": fid, "evidence": evidence, "status": "new",
                           "session_id": event["session_id"], "turn_id": event["turn_id"],
-                          "project": event["cwd"], "created": time.time()})
+                          "project": event["cwd"], "created": time.time(), "feedback": "pending"})
             findings.append(fid)
     append_record(root, event, {"kind": "summary", "source": source_for(event),
                   "context_complete": bool(event.get("prompt") and event.get("last_assistant_message") and not event.get("truncated")),
@@ -463,10 +477,15 @@ def worker(config_path, evaluator=evaluate):
         if not worker_lock:
             return
         while True:
+            config = read_json(config_path)
             with lock(root / "queue.lock"):
                 state = read_json(root / "state.json", {})
                 wake = state.get("wake", 0)
                 pending = [(p, read_json(p)) for p in sorted((root / "queue").glob("*.json"), key=lambda p: p.stat().st_mtime)]
+                for p, event in pending:
+                    if not project_allowed(config, event.get("cwd")):
+                        p.unlink(missing_ok=True)
+                pending = [(p, e) for p, e in pending if project_allowed(config, e.get("cwd"))]
                 pending = [(p, e) for p, e in pending if e.get("ready")]
                 if not pending or not state.get("enabled", True) or state.get("failed_wake") == wake:
                     # Release worker ownership while queue.lock still excludes collectors.
@@ -476,7 +495,7 @@ def worker(config_path, evaluator=evaluate):
                 path, event = pending[0]
             event = transcript_exchange(event)
             try:
-                if event.get("skip_subagent"):
+                if event.get("skip_subagent") or event.get("prompt", "").startswith(MARKER):
                     value, elapsed = {"summary": {}, "checked": [], "findings": []}, 0
                 else:
                     value, elapsed = evaluator(config, event)
@@ -492,7 +511,8 @@ def worker(config_path, evaluator=evaluate):
                     state["last_completed"] = time.time()
                     atomic(root / "state.json", state)
                 if new:
-                    spawn(config_path, "notify")
+                    deliver(read_json(config_path), root,
+                            [read_json(root / "findings" / (fid + ".json")) for fid in new])
             except (RuntimeError, ValueError, OSError) as exc:
                 with lock(root / "queue.lock"):
                     if isinstance(exc, ValueError) or str(exc) in ("timeout", "codex_failed", "result_too_large"):
@@ -513,7 +533,7 @@ def worker(config_path, evaluator=evaluate):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", required=True, type=Path)
-    parser.add_argument("command", choices=["hook", "work", "status", "retry", "pause", "resume", "panel", "notify"])
+    parser.add_argument("command", choices=["hook", "work", "status", "retry", "pause", "resume"])
     args = parser.parse_args()
     os.umask(0o077)
     config = read_json(args.config)
@@ -546,10 +566,10 @@ def main():
         spawn(args.config, "work")
     elif args.command == "status":
         print(json.dumps({**read_json(root / "state.json", {}),
+                          "project_roots": config.get("project_roots", [config["vault"]]),
+                          "feedback": dict(Counter(read_json(p).get("feedback", "legacy")
+                                                   for p in (root / "findings").glob("*.json"))),
                           "pending": len(list((root / "queue").glob("*.json")))}, ensure_ascii=False))
-    else:
-        from panel import panel, notify
-        (panel if args.command == "panel" else notify)(args.config, config, root)
 
 
 if __name__ == "__main__":

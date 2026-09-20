@@ -1,0 +1,122 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+:root{color-scheme:light dark;font:13px/1.4 system-ui,sans-serif;color:light-dark(#242424,#eee)}
+body{margin:0;background:transparent}*{box-sizing:border-box}article{padding:8px 10px}
+h3{font-size:13px;font-weight:600;margin:0 0 3px;overflow-wrap:anywhere}p{margin:0 0 6px;overflow-wrap:anywhere;white-space:pre-line}
+button{font:inherit;border:1px solid light-dark(#ddd,#555);border-radius:5px;padding:3px 10px;color:inherit;background:light-dark(#fff,#292929);cursor:pointer;min-height:28px}
+.options{border:0;padding:0;margin:0 0 6px;min-width:0}.options label{display:flex;align-items:flex-start;gap:7px;padding:3px 5px;cursor:pointer;overflow-wrap:anywhere;border-radius:4px}.options label:hover,.options label:has(input:checked){background:light-dark(#f1f1f1,#333)}.options input{flex:none;margin:3px 0 0;accent-color:light-dark(#333,#ddd)}.options span{min-width:0}
+button:first-child{background:light-dark(#242424,#eee);color:light-dark(#fff,#242424)}
+.actions{display:flex;justify-content:flex-end;gap:6px}.error{color:light-dark(#b42318,#ffb4a9);margin:4px 10px}.error:empty{display:none}button:disabled{opacity:.5;cursor:default}
+</style></head><body><main id="items"></main><p id="error" role="status" class="error"></p>
+<script>
+// MCP Apps 2026-01-26: only initialization, tool calls and view lifecycle.
+const pending=new Map();let nextId=0,sessionId='';
+const root=document.getElementById('items'),error=document.getElementById('error');
+function notify(method,params={}){parent.postMessage({jsonrpc:'2.0',method,params},'*');}
+function request(method, params) {
+  return new Promise((resolve, reject) => {
+    const id = ++nextId;
+    const timer = setTimeout(() => {
+      pending.delete(id);
+      reject(new Error('连接超时；请检查建议状态后再操作。'));
+    }, 30000);
+    pending.set(id, {resolve, reject, timer});
+    parent.postMessage({jsonrpc: '2.0', id, method, params}, '*');
+  });
+}
+function closeIfDone(){if(!root.children.length){error.textContent='';notify('ui/notifications/size-changed',{height:0});notify('ui/notifications/request-teardown');}}
+function render(data) {
+  sessionId = data.session_id;
+  root.replaceChildren();
+  error.textContent = '';
+  for (const item of data.items) {
+    const row = document.createElement('article');
+    const title = document.createElement('h3');
+    title.textContent = item.title;
+    const summary = document.createElement('p');
+    summary.textContent = item.summary;
+    if (item.title) row.append(title);
+    if (item.summary) row.append(summary);
+    if (item.pending) {
+      const status = document.createElement('p');
+      status.textContent = '提交结果待核实，请检查原会话；不会重复发送。';
+      row.append(status);
+      root.append(row);
+      continue;
+    }
+    let choices = null;
+    if (item.options?.length) {
+      choices = document.createElement('fieldset');
+      choices.className = 'options';
+      choices.setAttribute('aria-label', '处理方案');
+      for (const text of item.options) {
+        const label = document.createElement('label');
+        const input = document.createElement('input');
+        input.type = 'radio';
+        input.name = 'choice-' + item.id;
+        input.value = text;
+        const caption = document.createElement('span');
+        caption.textContent = text;
+        label.append(input, caption);
+        choices.append(label);
+      }
+      row.append(choices);
+    }
+    const actions = document.createElement('div');
+    actions.className = 'actions';
+    for (const [action, label] of [['confirm', '确认'], ['ignore', '忽略']]) {
+      const button = document.createElement('button');
+      button.textContent = label;
+      button.type = 'button';
+      button.addEventListener('click', async () => {
+        const selection = choices?.querySelector('input:checked')?.value || '';
+        if (action === 'confirm' && choices && !selection) { choices.querySelector('input').focus(); return; }
+        const buttons = row.querySelectorAll('button');
+        buttons.forEach(b => b.disabled = true);
+        if (choices) choices.disabled = true;
+        error.textContent = '';
+        try {
+          const result = await request('tools/call', {name: 'decide_monitor_feedback', arguments: {
+            session_id: sessionId, finding_id: item.id, action, selection
+          }});
+          if (result.isError) throw new Error(result.content?.[0]?.text || '操作失败');
+          if (!result.structuredContent?.done) throw new Error('操作未确认');
+          row.remove();
+          closeIfDone();
+        } catch (e) {
+          error.textContent = e.message;
+          buttons.forEach(b => b.disabled = false);
+          if (choices) choices.disabled = false;
+        }
+      });
+      actions.append(button);
+    }
+    row.append(actions);
+    root.append(row);
+  }
+  closeIfDone();
+}
+window.addEventListener('message', event => {
+  if (event.source !== parent) return;
+  const msg = event.data;
+  if (!msg || msg.jsonrpc !== '2.0') return;
+  if (pending.has(msg.id) && ('result' in msg || 'error' in msg)) {
+    const task = pending.get(msg.id);
+    pending.delete(msg.id);
+    clearTimeout(task.timer);
+    msg.error ? task.reject(new Error(msg.error.message)) : task.resolve(msg.result);
+    return;
+  }
+  if (msg.method === 'ui/notifications/tool-result' && msg.params?.structuredContent)
+    render(msg.params.structuredContent);
+  if (msg.method === 'ui/resource-teardown') {
+    parent.postMessage({jsonrpc: '2.0', id: msg.id, result: {}}, '*');
+    root.replaceChildren();
+  }
+  if (msg.method === 'ui/notifications/host-context-changed' && msg.params?.theme)
+    document.documentElement.style.colorScheme = msg.params.theme;
+});
+new ResizeObserver(()=>notify('ui/notifications/size-changed',{height:root.children.length?document.body.scrollHeight:0})).observe(document.body);
+request('ui/initialize',{appInfo:{name:'sunday-note-monitor',version:'1.0.0'},appCapabilities:{},protocolVersion:'2026-01-26'}).then(result=>{if(result.hostContext?.theme)document.documentElement.style.colorScheme=result.hostContext.theme;notify('ui/notifications/initialized');}).catch(e=>error.textContent=e.message);
+</script></body></html>

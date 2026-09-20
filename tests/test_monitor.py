@@ -14,7 +14,8 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "automation" / "monitor"))
 import monitor as m
-import panel
+import feedback
+import widget_server as widget
 
 spec = importlib.util.spec_from_file_location("installer", ROOT / "install" / "configure_monitor.py")
 installer = importlib.util.module_from_spec(spec)
@@ -36,6 +37,7 @@ class MonitorTests(unittest.TestCase):
         self.project = self.base / "project"
         self.project.mkdir()
         self.config = {"vault": str(self.vault), "codex": "codex", "skill": str(ROOT / "skills/sunday-note-monitor/SKILL.md"), "query": "unused"}
+        self.config["project_roots"] = [str(self.project)]
         self.cp = self.base / "config.json"
         m.atomic(self.cp, self.config)
         self.root = m.root_for(self.config)
@@ -47,6 +49,33 @@ class MonitorTests(unittest.TestCase):
 
     def rows(self):
         return [json.loads(l) for p in (self.root / "sessions").glob("*.jsonl") for l in p.read_text().splitlines()]
+
+    def test_project_scope(self):
+        alias = self.base / "alias"
+        alias.symlink_to(self.project, target_is_directory=True)
+        for cwd in (self.project, self.project / "src", alias):
+            self.assertTrue(m.project_allowed(self.config, str(cwd)))
+        outside = self.project / "outside"
+        outside.symlink_to(self.vault, target_is_directory=True)
+        for cwd in (self.vault, outside, str(self.project) + "-other", "relative"):
+            for kind in ("UserPromptSubmit", "Stop"):
+                self.assertFalse(self.collect(kind, cwd=str(cwd)))
+        self.assertEqual(self.rows(), [])
+        self.assertFalse(list((self.root / "queue").glob("*.json")))
+        self.assertFalse((self.root / "state.json").exists())
+        self.assertTrue(m.project_allowed({"vault": str(self.vault)}, str(self.vault)))
+        self.assertFalse(m.project_allowed({"vault": str(self.vault)}, str(self.project)))
+        self.config["project_roots"] = []
+        self.assertFalse(self.collect("Stop"))
+        self.config["project_roots"] = [str(self.project), str(self.vault)]
+        self.assertTrue(m.project_allowed(self.config, str(self.vault)))
+
+    def test_removed_project_is_not_evaluated(self):
+        self.collect("Stop", last_assistant_message="answer")
+        m.atomic(self.cp, {**self.config, "project_roots": []})
+        m.worker(self.cp, lambda c, e: self.fail("excluded project evaluated"))
+        self.assertFalse(list((self.root / "queue").glob("*.json")))
+        self.assertFalse(any(r["kind"] == "summary" for r in self.rows()))
 
     def test_dedup_pair_and_raw_cleanup(self):
         self.collect("UserPromptSubmit", prompt="question")
@@ -199,17 +228,35 @@ class MonitorTests(unittest.TestCase):
             m.validate({"findings": []}, m.RESULT_SCHEMA)
         file = self.project / "README.md"
         file.write_text("old entry")
-        item = {"category":"consistency", "title":"entry drift", "reason":"comparison", "instruction":"check entry",
+        item = {"title":"entry drift", "reason":"comparison", "instruction":"check entry",
                 "options":["update document","check code"], "evidence":[{"location":str(file),"quote":"old entry"}]}
         result = empty()
         result["findings"] = [item]
         m.validate(result, m.RESULT_SCHEMA)
         new = m.finalize(self.root, self.config, self.event, result, 1)
         self.assertEqual(len(new), 1)
-        panel.update(self.root, new[0], status="ignored")
         self.assertEqual(m.finalize(self.root,self.config,self.event,result,1), [])
         item["evidence"][0]["quote"] = "nonexistent"
         self.assertEqual(m.finalize(self.root,self.config,self.event,result,1), [])
+
+    def test_feedback_dedup_uses_content_with_empty_title(self):
+        file = self.project / "source.md"
+        file.write_text("shared evidence")
+        original = {"title": "", "reason": "background", "instruction": "check source",
+                    "options": ["check", "compare"],
+                    "evidence": [{"location": str(file), "quote": "shared evidence"}]}
+        result = empty()
+        result["findings"] = [original]
+        first = m.finalize(self.root, self.config, self.event, result, 0)
+        self.assertEqual(len(first), 1)
+        for field, value in (("reason", "another insight"), ("instruction", "update source"),
+                             ("options", ["update", "compare"])):
+            with self.subTest(field=field):
+                result["findings"] = [{**original, field: value}]
+                ids = m.finalize(self.root, self.config, self.event, result, 0)
+                self.assertEqual(len(ids), 1)
+                self.assertNotEqual(ids, first)
+                self.assertEqual(m.finalize(self.root, self.config, self.event, result, 0), [])
 
     def test_evidence_line_ranges(self):
         file = self.project / "module.py"
@@ -316,39 +363,172 @@ else: raise SystemExit(1)
         self.assertEqual(self.rows()[-1]["kind"],"summary")
         self.assertFalse(list((self.root/"findings").glob("*.json")))
 
-    def test_native_panel_choice_copy(self):
+    def finding(self):
         f = self.project / "a.md"
         f.write_text("evidence")
         result=empty()
-        result["findings"]=[{"category":"knowledge","title":"new relation","reason":"reusable",
+        result["findings"]=[{"title":"new relation " + str(len(list((self.root / "findings").glob("*.json")))),"reason":"reusable",
                              "instruction":"check and ingest","options":["ingest","skip"],
                              "evidence":[{"location":str(f),"quote":"evidence"}]}]
         fid=m.finalize(self.root,self.config,self.event,result,0)[0]
         item=m.read_json(self.root/"findings"/(fid+".json"))
-        with patch.object(panel,"zenity",side_effect=["option:0","copy"]), patch.object(panel,"copy_text",return_value=True) as cp:
-            panel.detail(self.root,item)
-        updated=m.read_json(self.root/"findings"/(fid+".json"))
-        self.assertEqual(updated["selection"],"ingest")
-        self.assertIn("用户选择：ingest",cp.call_args.args[0])
+        return item
 
-    def test_panel_progressive_disclosure_and_explicit_copy(self):
-        item = {"id":"ui", "project":"/project", "session_id":"s", "turn_id":"t",
-                "title":"短标题", "reason":"简短原因" + "长解释" * 100,
-                "instruction":"完整动作", "options":["方案一"],
-                "evidence":[{"location":"/project/a", "quote":"完整证据"}]}
-        m.atomic(self.root/"findings/ui.json",item)
-        with patch.object(panel,"zenity",side_effect=["option:0","expand",None,None]) as ui, patch.object(panel,"copy_text") as cp:
-            panel.detail(self.root,item)
-        cp.assert_not_called()
-        first = " ".join(ui.call_args_list[0].args)
-        self.assertNotIn("完整证据",first)
-        self.assertNotIn("完整动作",first)
-        self.assertNotIn(item["reason"],first)
-        expanded = ui.call_args_list[2].kwargs["input_text"]
-        self.assertIn("完整证据",expanded)
-        self.assertIn(item["reason"],expanded)
-        self.assertIn("用户选择：方案一",expanded)
-        self.assertEqual(m.read_json(self.root/"findings/ui.json")["status"],"selected")
+    def test_feedback_native_queue(self):
+        item = self.finding()
+        with patch.object(feedback.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)) as send:
+            feedback.deliver(self.config, self.root, [item])
+        argv = send.call_args.args[0]
+        self.assertEqual(argv[:5], ["codex", "queue", "--thread", "s", "--message"])
+        self.assertIn(feedback.RENDER_TOOL, argv[-1])
+        self.assertIn("不是用户授权", argv[-1])
+        self.assertIn(item["id"], argv[-1])
+        self.assertNotIn(item["instruction"], argv[-1])
+        self.assertLess(len(argv[-1]), 1000)
+        self.assertEqual(item["feedback"], "queued")
+
+    def test_feedback_failure_and_scope(self):
+        item = self.finding()
+        with patch.object(feedback.subprocess, "run") as send:
+            feedback.deliver({**self.config, "project_roots": []}, self.root, [item])
+        send.assert_not_called()
+        self.assertEqual(item["feedback"], "skipped_scope")
+        self.assertTrue(any(r["kind"] == "summary" for r in self.rows()))
+
+    def test_feedback_queue_failure_and_bounded_message(self):
+        item = self.finding()
+        item.update(title="标题" * 1000, reason="原因" * 1000,
+                    instruction="建议" * 1000, options=["选项" * 1000] * 3)
+        self.assertLess(len(feedback.message([item])), 1000)
+        for failure in (subprocess.CompletedProcess([], 1), subprocess.TimeoutExpired("codex", 20)):
+            with patch.object(feedback.subprocess, "run") as send:
+                if isinstance(failure, Exception):
+                    send.side_effect = failure
+                else:
+                    send.return_value = failure
+                feedback.deliver(self.config, self.root, [item])
+            self.assertEqual(item["feedback"], "failed")
+            argv = send.call_args.args[0]
+            self.assertNotIn("--remote", argv)
+            self.assertNotIn("--model", argv)
+
+    def test_widget_render_and_scope(self):
+        item = self.finding()
+        args = {"session_id": "s", "finding_ids": [item["id"]]}
+        path = self.root / "findings" / (item["id"] + ".json")
+        before = path.read_bytes()
+        result = widget.call(self.config, feedback.RENDER_TOOL, args)
+        self.assertEqual(len(result["structuredContent"]["items"]), 1)
+        self.assertEqual(path.read_bytes(), before)
+        item.update(reason="", options=[])
+        m.atomic(path, item)
+        view = widget.call(self.config, feedback.RENDER_TOOL, args)["structuredContent"]["items"][0]
+        self.assertEqual(view["summary"], item["instruction"])
+        self.assertEqual(view["options"], [])
+        for invalid in ({**args, "session_id": "other"}, {**args, "finding_ids": ["../config"]}):
+            with self.assertRaises(ValueError):
+                widget.call(self.config, feedback.RENDER_TOOL, invalid)
+        with self.assertRaises(ValueError):
+            widget.call({**self.config, "project_roots": []}, feedback.RENDER_TOOL, args)
+
+    def test_one_feedback_and_reference_only_acknowledgment(self):
+        item = self.finding()
+        result = empty()
+        source = {k: item[k] for k in m.RESULT_SCHEMA["properties"]["findings"]["items"]["properties"]}
+        source["evidence"] = [{k: e[k] for k in ("location", "quote")} for e in item["evidence"]]
+        result["findings"] = [source, source]
+        with self.assertRaises(ValueError):
+            m.validate(result, m.RESULT_SCHEMA)
+        with self.assertRaises(ValueError):
+            widget.call(self.config, feedback.RENDER_TOOL,
+                        {"session_id": "s", "finding_ids": [item["id"], item["id"]]})
+        source.update(title="", instruction="", options=[])
+        result["findings"] = [source]
+        m.validate(result, m.RESULT_SCHEMA)
+        fid = m.finalize(self.root, self.config, self.event, result, 0)[0]
+        with patch.object(widget, "queue") as send:
+            widget.call(self.config, widget.ACTION_TOOL,
+                        {"session_id": "s", "finding_id": fid, "action": "confirm"})
+        send.assert_not_called()
+        self.assertEqual(m.read_json(self.root / "findings" / (fid + ".json"))["status"], "acknowledged")
+
+    def test_widget_decisions(self):
+        for action in ("confirm", "ignore"):
+            item = self.finding()
+            args = {"session_id": "s", "finding_id": item["id"], "action": action}
+            if action == "confirm":
+                with self.assertRaises(ValueError):
+                    widget.call(self.config, widget.ACTION_TOOL, args)
+                args["selection"] = item["options"][0]
+            with patch.object(widget, "queue") as send:
+                for _ in range(2):
+                    self.assertTrue(widget.call(self.config, widget.ACTION_TOOL, args)["structuredContent"]["done"])
+            self.assertEqual(send.call_count, int(action == "confirm"))
+            if action == "confirm":
+                self.assertEqual(send.call_args.args[1], "s")
+                self.assertIn(args["selection"], send.call_args.args[2])
+                self.assertFalse(send.call_args.args[2].startswith(feedback.MARKER))
+            rendered = widget.call(self.config, feedback.RENDER_TOOL,
+                                   {"session_id": "s", "finding_ids": [item["id"]]})
+            self.assertEqual(rendered["structuredContent"]["items"], [])
+
+    def test_widget_uncertain_submission_is_not_repeated(self):
+        item = self.finding()
+        args = {"session_id": "s", "finding_id": item["id"], "action": "confirm", "selection": "ingest"}
+        with patch.object(widget, "queue", side_effect=RuntimeError("queue_failed")) as send:
+            for _ in range(2):
+                with self.assertRaises((ValueError, RuntimeError)):
+                    widget.call(self.config, widget.ACTION_TOOL, args)
+        self.assertEqual(send.call_count, 1)
+        result = widget.call(self.config, feedback.RENDER_TOOL,
+                             {"session_id": "s", "finding_ids": [item["id"]]})
+        self.assertTrue(result["structuredContent"]["items"][0]["pending"])
+
+    def test_widget_confirmation_without_options_and_delivery_race(self):
+        item = self.finding()
+        item["options"] = []
+        path = self.root / "findings" / (item["id"] + ".json")
+        m.atomic(path, item)
+        def decide(*args):
+            with patch.object(widget, "queue"):
+                widget.call(self.config, widget.ACTION_TOOL,
+                            {"session_id": "s", "finding_id": item["id"], "action": "confirm"})
+        with patch.object(feedback, "queue", side_effect=decide):
+            feedback.deliver(self.config, self.root, [item])
+        saved = m.read_json(path)
+        self.assertEqual(saved["status"], "submitted")
+        self.assertEqual(saved["feedback"], "queued")
+
+    def test_mcp_registration_preserves_other_servers(self):
+        original = '[mcp_servers.other]\ncommand = "keep"\n'
+        result = installer.configure_mcp(original, self.base, self.cp)
+        result = installer.configure_mcp(result, self.base, self.cp)
+        self.assertEqual(result.count(installer.MCP_BEGIN), 1)
+        removed = installer.configure_mcp(result, self.base, self.cp, uninstall=True)
+        self.assertEqual(installer.tomllib.loads(removed), installer.tomllib.loads(original))
+        with self.assertRaises(ValueError):
+            installer.configure_mcp('[mcp_servers.sunday_note_monitor]\ncommand = "user"\n', self.base, self.cp)
+
+    def test_widget_stdio_protocol(self):
+        requests = [{"jsonrpc": "2.0", "id": i, "method": method, "params": params}
+                    for i, (method, params) in enumerate([
+                        ("initialize", {}), ("tools/list", {}),
+                        ("resources/read", {"uri": widget.URI})])]
+        result = subprocess.run([sys.executable, str(ROOT / "automation/monitor/widget_server.py"),
+                                 "--config", str(self.cp)], input="\n".join(map(json.dumps, requests)) + "\n",
+                                text=True, capture_output=True, timeout=5, check=True)
+        responses = [json.loads(line)["result"] for line in result.stdout.splitlines()]
+        self.assertIn("tools", responses[0]["capabilities"])
+        self.assertEqual(responses[1]["tools"][0]["_meta"]["ui"]["resourceUri"], widget.URI)
+        self.assertEqual(responses[1]["tools"][1]["_meta"]["ui"]["visibility"], ["app"])
+        self.assertEqual(responses[2]["contents"][0]["mimeType"], widget.MIME)
+
+    def test_feedback_turn_does_not_recurse(self):
+        self.collect("UserPromptSubmit", prompt=feedback.MARKER + " test")
+        self.collect("Stop", last_assistant_message="question")
+        m.worker(self.cp, lambda c, e: self.fail("feedback was evaluated again"))
+        self.assertEqual(self.rows()[-1]["kind"], "summary")
+        self.assertFalse(list((self.root / "queue").glob("*.json")))
 
     def test_single_worker(self):
         self.collect("Stop",last_assistant_message="x")
@@ -363,9 +543,27 @@ else: raise SystemExit(1)
         (home / "config.toml").write_text('[features]\nhooks = false\n[unrelated]\nvalue = 4\n')
         existing = {"hooks":{"Stop":[{"hooks":[{"type":"command","command":"user-command"}]}]}}
         m.atomic(home / "hooks.json", existing)
+        runtime = self.vault / ".sunday-note-agent" / "monitor"
+        runtime.mkdir(parents=True)
+        (runtime / "panel.py").write_text("old panel")
+        (runtime / "personal.txt").write_text("preserve")
+        apps.mkdir()
+        (apps / "sunday-note-monitor.desktop").write_text("old launcher")
         with patch.object(installer.shutil, "which", side_effect=lambda x:"/usr/bin/" + x):
             installer.configure(self.vault,home,apps,proxy_url="http://127.0.0.1:12345")
+            installed = m.read_json(self.root / "config.json")
+            self.assertEqual(installed["project_roots"], [str(self.vault)])
+            m.atomic(self.root / "config.json", {**installed, "project_roots": []})
             installer.configure(self.vault,home,apps)
+        self.assertEqual(m.read_json(self.root / "config.json")["project_roots"], [])
+        self.assertFalse((runtime / "panel.py").exists())
+        self.assertTrue((runtime / "feedback.py").exists())
+        self.assertTrue((runtime / "widget_server.py").exists())
+        self.assertTrue((runtime / "widget.html").exists())
+        config = installer.tomllib.loads((home / "config.toml").read_text())
+        self.assertIn(str(runtime / "widget_server.py"), config["mcp_servers"]["sunday_note_monitor"]["args"])
+        self.assertEqual((runtime / "personal.txt").read_text(), "preserve")
+        self.assertFalse((apps / "sunday-note-monitor.desktop").exists())
         self.assertEqual(m.read_json(self.root / "config.json")["proxy_url"], "http://127.0.0.1:12345")
         hook = m.read_json(home / "hooks.json")
         self.assertEqual(len(hook["hooks"]["Stop"]), 2)
@@ -374,6 +572,7 @@ else: raise SystemExit(1)
         self.assertEqual(m.read_json(home/"hooks.json")["hooks"]["Stop"], existing["hooks"]["Stop"])
         self.assertIn("hooks = false", (home/"config.toml").read_text())
         self.assertIn("value = 4", (home/"config.toml").read_text())
+        self.assertNotIn("sunday_note_monitor", (home/"config.toml").read_text())
         self.assertTrue(self.root.exists())
 
     def test_symlink_log_rejected(self):
@@ -382,13 +581,6 @@ else: raise SystemExit(1)
         (other / ".logs").symlink_to(self.root.parent)
         with self.assertRaises(ValueError):
             m.root_for({"vault":str(other)})
-
-    def test_panel_copy_is_self_contained(self):
-        item = {"project":"/project","session_id":"s","turn_id":"t","title":"entry",
-                "reason":"drift","instruction":"check","evidence":[{"location":"/project/a","quote":"x"}]}
-        text = panel.copy_instruction(item)
-        self.assertIn("/project/a",text)
-        self.assertIn("尚未实施",text)
 
 
 if __name__ == "__main__":

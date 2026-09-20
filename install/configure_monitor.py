@@ -16,6 +16,27 @@ sys.path.insert(0, str(SOURCE / "automation" / "monitor"))
 from monitor import atomic, read_json, root_for
 
 MARKER = "SundayNoteAgent Monitor"
+MCP_BEGIN = "# BEGIN " + MARKER + " MCP\n"
+MCP_END = "# END " + MARKER + " MCP\n"
+
+
+def configure_mcp(text, runtime, config_path, uninstall=False):
+    start = text.find(MCP_BEGIN)
+    if start >= 0:
+        end = text.find(MCP_END, start)
+        if end < 0:
+            raise ValueError("Monitor MCP 配置标记不完整")
+        text = text[:start] + text[end + len(MCP_END):]
+    elif "sunday_note_monitor" in tomllib.loads(text).get("mcp_servers", {}):
+        if not uninstall:
+            raise ValueError("已有非托管 sunday_note_monitor MCP 配置，请先处理命名冲突")
+    if not uninstall:
+        text = text.rstrip() + "\n\n" + MCP_BEGIN + "[mcp_servers.sunday_note_monitor]\n"
+        text += "command = " + json.dumps(sys.executable) + "\n"
+        text += "args = " + json.dumps([str(runtime / "widget_server.py"), "--config", str(config_path)]) + "\n"
+        text += MCP_END
+    tomllib.loads(text)
+    return text
 
 
 def safe_path(path):
@@ -85,35 +106,39 @@ def configure(vault, codex_home, applications, uninstall=False, proxy_url=None):
         hooks["hooks"][event] = preserved
     root = root_for({"vault": str(vault)})
     install_state = root / "install.json"
+    config_path = root / "config.json"
     old = read_json(install_state, {})
+    updated = configure_mcp(original, runtime, config_path, uninstall)
     if uninstall:
         atomic(hook_file, hooks)
         change = old.get("feature_change")
-        if change and change["after"] in original:
-            write_text(config_file, original.replace(change["after"], change["before"], 1))
+        if change and change["after"] in updated:
+            updated = updated.replace(change["after"], change["before"], 1)
+        write_text(config_file, updated)
         desktop.unlink(missing_ok=True)
         state = read_json(root / "state.json", {})
         atomic(root / "state.json", {**state, "enabled": False})
         for p in (runtime, skill):
             if p.exists():
                 shutil.rmtree(p)
-        print("Monitor 已停用并移除自身 Hook、面板入口和托管副本；日志保留。")
+        print("Monitor 已停用并移除自身 Hook、MCP 注册和托管副本；日志保留。")
         return
-    needed = ["codex", "zenity", "notify-send", "rg"]
+    needed = ["codex", "rg"]
     missing = [name for name in needed if not shutil.which(name)]
-    if not any(shutil.which(x) for x in ("xclip", "xsel", "wl-copy")):
-        missing.append("xclip / xsel / wl-copy")
     if missing:
         raise ValueError("缺少依赖：" + ", ".join(missing))
-    updated, change = enable_hooks(original)
+    updated, change = enable_hooks(updated)
     tomllib.loads(updated)
     runtime.mkdir(parents=True, exist_ok=True)
     for p in (SOURCE / "automation" / "monitor").glob("*.py"):
         shutil.copy2(p, runtime / p.name)
+    shutil.copy2(SOURCE / "automation" / "monitor" / "widget.html", runtime / "widget.html")
+    (runtime / "panel.py").unlink(missing_ok=True)
+    desktop.unlink(missing_ok=True)
     skill.mkdir(parents=True, exist_ok=True)
     shutil.copy2(SOURCE / "skills" / "sunday-note-monitor" / "SKILL.md", skill / "SKILL.md")
-    config_path = root / "config.json"
     local_config = read_json(config_path, {})
+    local_config.setdefault("project_roots", [str(vault.resolve())])
     if proxy_url is not None:
         local_config["proxy_url"] = proxy_url
     atomic(config_path, {**local_config, "vault": str(vault), "codex": shutil.which("codex"),
@@ -125,14 +150,10 @@ def configure(vault, codex_home, applications, uninstall=False, proxy_url=None):
             {"type": "command", "command": shlex.join([*argv, "hook"]), "timeout": 5}]})
     atomic(hook_file, hooks)
     write_text(config_file, updated)
-    # Desktop Exec uses double-quoted arguments, not shell single-quote syntax.
-    exec_line = " ".join('"' + s.replace("\\", "\\\\").replace('"', '\\"').replace("`", "\\`").replace("$", "\\$").replace("%", "%%") + '"'
-                         for s in [*argv, "panel"])
-    write_text(desktop, "[Desktop Entry]\nType=Application\nName=Monitor 建议\nTerminal=false\nExec=" + exec_line + "\n")
     atomic(install_state, {"feature_change": old.get("feature_change") or change})
     state = read_json(root / "state.json", {})
     atomic(root / "state.json", {**state, "enabled": True})
-    print("Monitor 已安装。请在 Codex /hooks 中审阅并信任两个 Hook；桌面客户端重新加载后验证。")
+    print("Monitor 已安装。请在 Codex /hooks 中审阅并信任两个 Hook，重新加载客户端的 MCP 工具后验证 widget。")
     print("日志及配置：" + str(root))
 
 
