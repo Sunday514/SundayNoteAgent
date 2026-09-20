@@ -72,6 +72,9 @@ def main() -> None:
         "description": PAPER_DESCRIPTION,
     }, paper_skill
     assert "summary_evidence.json" in paper_body, paper_skill
+    assert "conda run -n papers python" in paper_body, paper_skill
+    assert "已长期授权" in paper_body, paper_skill
+    assert "无需确认" in paper_body, paper_skill
     assert "write_summary_status.py" not in paper_body, paper_skill
 
     print("skill packaging fixture passed")

@@ -60,7 +60,7 @@ bash SundayNoteAgent/install/install.sh
 个人上下文.md                                     # 根目录五章空页面，只在缺失时创建
 ```
 
-默认的 `--routine-templates managed` 会刷新托管的 Weekly 和 month pack 模板，并在缺失时创建 Daily 模板。`--routine-templates preserve` 不创建或刷新模板，也不修改 Calendar 的 Weekly 模板设置。两种模式都会刷新托管的根规则和 skills，并保留个人上下文与已生成的个性化响应段。论文总结 skill 首次启用时传入 `--with-paper-summarizer`；启用后普通重跑也会继续更新。
+默认的 `--routine-templates managed` 会刷新托管的 Weekly 和 month pack 模板，并在缺失时创建 Daily 模板。`--routine-templates preserve` 不创建或刷新模板，也不修改 Calendar 的 Weekly 模板设置。两种模式都会刷新托管的根规则和 skills，并保留个人上下文与已生成的个性化响应段。论文总结 skill 首次启用时传入 `--with-paper-summarizer`；启用后普通重跑也会继续更新。当前 Python 缺少 Docling 时，Skill 已长期授权使用 `conda run -n papers python`，无需确认。
 
 安装完成后可主动要求 agent“初始化个人上下文”，具体流程见[安装器说明](install/README.md)。
 

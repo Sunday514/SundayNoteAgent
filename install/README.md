@@ -44,11 +44,13 @@ bash SundayNoteAgent/install/install.sh
 bash SundayNoteAgent/install/install.sh --vault-root .
 ```
 
-论文总结是可选组件，依赖可运行 docling 的 Python 环境。需要启用时增加参数：
+论文总结是可选组件，依赖可运行 Docling 的 Python 环境。需要启用时增加参数：
 
 ```bash
 bash SundayNoteAgent/install/install.sh --vault-root . --with-paper-summarizer
 ```
+
+当前 Python 缺少 Docling 时，Skill 已长期授权使用 `conda run -n papers python`，无需确认；两者均不可用则停止。
 
 已有自己的 Routine 模板和 Calendar 创建规则时，使用保留模式：
 
@@ -91,7 +93,7 @@ bash SundayNoteAgent/install/install.sh --vault-root . --routine-templates prese
 
 安装完成后建议用户主动要求 agent“初始化个人上下文”，或显式调用 `$sunday-note-context`。该流程逐题询问缺失信息，整个访谈最多追加两题澄清，再生成完整个人上下文、个性化响应 prompt 和入口链接；两份完整草案经一次明确确认后写入。根规则不预留该段，安装器也不自动触发或提醒该流程。
 
-项目模板只保存稳定结构和自动块标记，不包含具体打卡类别或个人正文。Daily 模板只在缺失时创建，Weekly 和 month pack 模板由安装器刷新；自动化脚本和统计配置使用固定的 Routine 与模板路径。论文总结脚本使用当前 Python 环境，导入工作目录为 `.import_files`，摘要目录为 `10_原始材料`。
+项目模板只保存稳定结构和自动块标记，不包含具体打卡类别或个人正文。Daily 模板只在缺失时创建，Weekly 和 month pack 模板由安装器刷新；自动化脚本和统计配置使用固定的 Routine 与模板路径。论文总结导入工作目录为 `.import_files`，摘要目录为 `10_原始材料`。
 
 ## 知识流
 

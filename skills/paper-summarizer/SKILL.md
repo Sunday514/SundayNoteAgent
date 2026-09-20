@@ -15,10 +15,12 @@ description: 用户要求精读或总结本地 PDF 论文时使用。
 
 ## 工作流
 
-1. 从父 vault 根目录使用当前 Python 环境，确认 Docling 等依赖可用，不猜测或切换 conda 环境。准备并解析：
+1. 在父 vault 根目录选择解释器：当前 `python` 能导入 Docling 时使用它，否则使用已长期授权的 `conda run -n papers python`，无需确认。整轮固定同一解释器；两者均不可用则停止。
+
+准备并解析：
 
 ```bash
-python .agents/skills/paper-summarizer/scripts/prepare_paper_summary.py --vault-root . --pdf <paper.pdf>
+<paper-python> .agents/skills/paper-summarizer/scripts/prepare_paper_summary.py --vault-root . --pdf <paper.pdf>
 ```
 
 可附加 `--metadata`、`--title`、`--authors`、`--published-at`、`--paper-link` 或 `--code-link`；缺失信息写“未明确”。
@@ -30,7 +32,7 @@ python .agents/skills/paper-summarizer/scripts/prepare_paper_summary.py --vault-
 6. 校验证据、metadata、结构和图像，并更新状态：
 
 ```bash
-python .agents/skills/paper-summarizer/scripts/validate_summary.py <summary_path> --work-dir <work_dir>
+<paper-python> .agents/skills/paper-summarizer/scripts/validate_summary.py <summary_path> --work-dir <work_dir>
 ```
 
 事实只来自解析文本或 metadata。PDF 缺失、解析失败、模型 artifact 缺失或校验失败时停止，报告失败步骤。产物不写入工具仓库。
