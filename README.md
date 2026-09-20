@@ -29,6 +29,12 @@ bash SundayNoteAgent/install/install.sh --vault-root .
 bash SundayNoteAgent/install/install.sh --vault-root . --with-paper-summarizer
 ```
 
+已有自己的 Daily、Weekly、Monthly 模板或 Calendar 创建规则时，保留它们并跳过托管模板部署：
+
+```bash
+bash SundayNoteAgent/install/install.sh --vault-root . --routine-templates preserve
+```
+
 本地验证或使用 fork 时：
 
 ```bash
@@ -54,11 +60,11 @@ bash SundayNoteAgent/install/install.sh
 个人上下文.md                                     # 根目录五章空页面，只在缺失时创建
 ```
 
-重复运行安装器会刷新托管的根规则、skills、Weekly 和 month pack 模板，并保留个人上下文与已生成的个性化响应段。Daily 模板和本地统计配置只在缺失时创建。论文总结 skill 首次启用时传入 `--with-paper-summarizer`；启用后普通重跑也会继续更新。
+默认的 `--routine-templates managed` 会刷新托管的 Weekly 和 month pack 模板，并在缺失时创建 Daily 模板。`--routine-templates preserve` 不创建或刷新模板，也不修改 Calendar 的 Weekly 模板设置。两种模式都会刷新托管的根规则和 skills，并保留个人上下文与已生成的个性化响应段。论文总结 skill 首次启用时传入 `--with-paper-summarizer`；启用后普通重跑也会继续更新。
 
 安装完成后可主动要求 agent“初始化个人上下文”，具体流程见[安装器说明](install/README.md)。
 
-用户先安装并启用需要的 Obsidian 插件，然后关闭 Obsidian、运行安装器，完成后再启动 Obsidian。Calendar 可用时，安装器维护 Weekly 创建格式、目录和模板字段；QuickAdd 可用时，安装器维护“统计本周打卡”和“刷新每月统计”两个 Routine choice，并从可见的 `SundayNoteAgent/automation/quickadd/rollup.js` 加载脚本。其他插件字段、choices 和社区插件启用列表保持不变。缺失的可选插件不会阻断核心安装，安装结果会列出未配置的工作流。
+用户先安装并启用需要的 Obsidian 插件，然后关闭 Obsidian、运行安装器，完成后再启动 Obsidian。Calendar 可用且模板模式为 `managed` 时，安装器维护 Weekly 创建格式、目录和模板字段；`preserve` 模式保留 Calendar 配置。QuickAdd 可用时，安装器维护“统计本周打卡”和“刷新每月统计”两个 Routine choice，并从可见的 `SundayNoteAgent/automation/quickadd/rollup.js` 加载脚本。其他插件字段、choices 和社区插件启用列表保持不变。缺失的可选插件不会阻断核心安装，安装结果会列出未配置的工作流。
 
 ## 更新
 

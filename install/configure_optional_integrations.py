@@ -69,12 +69,18 @@ def configure_quickadd(vault_root: Path, config_root: Path, enabled: set[str]) -
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--vault-root", type=Path, required=True)
+    parser.add_argument(
+        "--skip-calendar",
+        action="store_true",
+        help="Preserve Calendar configuration instead of applying managed Weekly fields",
+    )
     args = parser.parse_args()
 
     config_root = Path(__file__).resolve().parent.parent / "config" / "obsidian"
     enabled_path = args.vault_root / ".obsidian" / "community-plugins.json"
     enabled = set(load_json(enabled_path)) if enabled_path.is_file() else set()
-    configure_calendar(args.vault_root, config_root, enabled)
+    if not args.skip_calendar:
+        configure_calendar(args.vault_root, config_root, enabled)
     configure_quickadd(args.vault_root, config_root, enabled)
     return 0
 

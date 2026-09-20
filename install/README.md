@@ -50,6 +50,14 @@ bash SundayNoteAgent/install/install.sh --vault-root .
 bash SundayNoteAgent/install/install.sh --vault-root . --with-paper-summarizer
 ```
 
+已有自己的 Routine 模板和 Calendar 创建规则时，使用保留模式：
+
+```bash
+bash SundayNoteAgent/install/install.sh --vault-root . --routine-templates preserve
+```
+
+`--routine-templates managed` 是默认值：部署 Daily、Weekly、Monthly 模板并维护 Calendar Weekly 字段。`preserve` 不读取、创建或刷新这些模板，也不修改 Calendar 配置；其他核心安装与 QuickAdd 可选集成照常执行。
+
 ## 生成内容
 
 安装器会创建缺失的：
@@ -70,11 +78,11 @@ bash SundayNoteAgent/install/install.sh --vault-root . --with-paper-summarizer
 
 不论是新 vault 还是已有 vault，安装器都会补建缺失的标准一级目录和 `.import_files/`，但不创建二级结构，也不整理已有内容。工具入口的维护方式是：
 
-- 每次刷新父 vault 的 `AGENTS.md` 托管规则、四个基础 skill、Weekly 和 month pack 模板。
+- 每次刷新父 vault 的 `AGENTS.md` 托管规则和四个基础 skill；`managed` 模式同时刷新 Weekly 和 month pack 模板。
 - 传入 `--with-paper-summarizer` 时首次导出 `paper-summarizer`；已导出时，普通重跑也会刷新它。
 - 托管目录中不与源仓库同名的额外文件会保留。
 - 父 vault `.sunday-note-agent/config/quickadd-rollups.json` 下的 QuickAdd 统计配置只在缺失时创建，已有配置保持不变。
-- 已安装并启用 Calendar 时，维护 `showWeeklyNote`、`weeklyNoteFormat`、`weeklyNoteTemplate`、`weeklyNoteFolder`。
+- 已安装并启用 Calendar 且模板模式为 `managed` 时，维护 `showWeeklyNote`、`weeklyNoteFormat`、`weeklyNoteTemplate`、`weeklyNoteFolder`；`preserve` 模式保持 Calendar 配置不变。
 - 已安装并启用 QuickAdd 时，按稳定 ID 或名称维护“统计本周打卡”和“刷新每月统计”两个 Routine choices。
 - Calendar、QuickAdd 的其他字段、其他 choices 和 `.obsidian/community-plugins.json` 保持不变。
 - 父 vault `.stignore` 保留已有内容，每次安装确保包含根目录规则 `/SundayNoteAgent` 和 `/.import_files`。
@@ -91,7 +99,7 @@ bash SundayNoteAgent/install/install.sh --vault-root . --with-paper-summarizer
 - Query 搜索 Wiki，并在个性化任务需要时读取根目录个人上下文；Wiki 证据不足时，只沿页面中的直接链接按需读取 Raw / Routine。
 - Lint 仅在用户显式调用 `$sunday-note-lint` 时触发，逐页检查整个 Wiki，并用 `lint_headers.py` 和 `audit_reachability.py` 建立机械基线。默认按唯一全局计划委派 Wiki 维护，子任务继承已授权范围；只读请求只报告。默认展示范围和结果摘要，完整任务明细按需展开，阻塞、失败和未完成事项必须报告。
 
-安装器覆盖四个核心 skill、Weekly 和 month pack 模板，保留托管目录中的额外文件。父 vault 的 Daily 模板、QuickAdd 统计配置、个人上下文和其他知识内容不进入托管覆盖范围。
+安装器始终覆盖四个核心 skill；`managed` 模式覆盖 Weekly 和 month pack 模板，`preserve` 模式不触碰任何 Routine 模板。父 vault 的 Daily 模板、QuickAdd 统计配置、个人上下文和其他知识内容不进入托管覆盖范围。
 
 普通 Routine 改写及 Ingest 多页写入，用户已明确操作和全部目标时直接执行；新增目标或操作再确认。删除、归档、未确认结论和个人上下文草案继续遵守 Skill 的专门确认规则。
 

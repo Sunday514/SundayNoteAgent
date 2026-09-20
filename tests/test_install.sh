@@ -192,6 +192,46 @@ assert_same_file "$TMP_ROOT/calendar.after-first.json" "$calendar_data"
 assert_same_file "$TMP_ROOT/quickadd.after-first.json" "$quickadd_data"
 assert_same_file "$TMP_ROOT/community-plugins.before.json" "$integrated/.obsidian/community-plugins.json"
 
+preserved="$TMP_ROOT/preserved"
+mkdir -p \
+  "$preserved/SundayNoteAgent" \
+  "$preserved/个人模板" \
+  "$preserved/.obsidian/plugins/calendar" \
+  "$preserved/.obsidian/plugins/quickadd"
+printf '%s\n' 'custom daily' > "$preserved/个人模板/日记录模板.md"
+printf '%s\n' 'custom weekly' > "$preserved/个人模板/周记录模板.md"
+printf '%s\n' 'custom monthly' > "$preserved/个人模板/月记录模板.md"
+cat > "$preserved/.obsidian/community-plugins.json" <<'EOF'
+[
+  "calendar",
+  "quickadd"
+]
+EOF
+printf '%s\n' '{"id":"calendar"}' > "$preserved/.obsidian/plugins/calendar/manifest.json"
+printf '%s\n' '{"id":"quickadd"}' > "$preserved/.obsidian/plugins/quickadd/manifest.json"
+cat > "$preserved/.obsidian/plugins/calendar/data.json" <<'EOF'
+{
+  "showWeeklyNote": true,
+  "weeklyNoteFormat": "YYYY-[W]WW",
+  "weeklyNoteTemplate": "个人模板/周记录模板.md",
+  "weeklyNoteFolder": "21_每周记录"
+}
+EOF
+printf '%s\n' '{"choices":[]}' > "$preserved/.obsidian/plugins/quickadd/data.json"
+cp -R "$preserved/个人模板" "$TMP_ROOT/preserved-templates.before"
+cp "$preserved/.obsidian/plugins/calendar/data.json" "$TMP_ROOT/preserved-calendar.before.json"
+
+preserve_output="$(bash "$ROOT/install/install.sh" --vault-root "$preserved" --routine-templates preserve)"
+assert_output_contains "$preserve_output" "已保留父 vault 的 Routine 模板与 Calendar 模板设置。"
+assert_same_file "$TMP_ROOT/preserved-templates.before/日记录模板.md" "$preserved/个人模板/日记录模板.md"
+assert_same_file "$TMP_ROOT/preserved-templates.before/周记录模板.md" "$preserved/个人模板/周记录模板.md"
+assert_same_file "$TMP_ROOT/preserved-templates.before/月记录模板.md" "$preserved/个人模板/月记录模板.md"
+test ! -e "$preserved/个人模板/每日记录.md" || fail "preserve mode created a Daily template"
+test ! -e "$preserved/个人模板/每周记录.md" || fail "preserve mode created a Weekly template"
+test ! -e "$preserved/个人模板/每月记录.md" || fail "preserve mode created a monthly template"
+assert_same_file "$TMP_ROOT/preserved-calendar.before.json" "$preserved/.obsidian/plugins/calendar/data.json"
+assert_file_contains "$preserved/.obsidian/plugins/quickadd/data.json" '"name": "统计本周打卡"'
+
 symlink_vault="$TMP_ROOT/symlink-vault"
 outside_calendar="$TMP_ROOT/outside-calendar.json"
 mkdir -p "$symlink_vault/SundayNoteAgent" "$symlink_vault/.obsidian/plugins/calendar"

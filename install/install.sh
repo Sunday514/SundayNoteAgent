@@ -4,6 +4,7 @@ set -euo pipefail
 PROJECT_DIR_NAME="SundayNoteAgent"
 VAULT_ROOT=""
 WITH_PAPER_SUMMARIZER=0
+ROUTINE_TEMPLATES_MODE="managed"
 OPTIONAL_CONFIG_PYTHON=""
 PERSONAL_CONTEXT_HEADING='## 个性化响应'
 RENDERED_AGENTS=""
@@ -21,12 +22,15 @@ usage() {
 Usage:
   install.sh
   install.sh --vault-root <vault-dir>
-  install.sh [--vault-root <vault-dir>] --with-paper-summarizer
+  install.sh [--vault-root <vault-dir>] [--with-paper-summarizer]
+             [--routine-templates managed|preserve]
 
 Install or update SundayNoteAgent-managed files from the current checkout.
 Without --vault-root, the vault root is the parent of SundayNoteAgent/.
 The installer creates missing vault-local files and refreshes only managed files and plugin fields.
 Paper summarizer is optional because it requires a docling-capable environment.
+Routine templates default to managed. Use preserve to leave existing templates
+and Calendar template settings unchanged without creating new template files.
 USAGE
 }
 
@@ -40,6 +44,19 @@ while [ "$#" -gt 0 ]; do
     --with-paper-summarizer)
       WITH_PAPER_SUMMARIZER=1
       shift
+      ;;
+    --routine-templates)
+      [ "$#" -ge 2 ] || { echo "missing value for --routine-templates" >&2; exit 2; }
+      case "$2" in
+        managed|preserve)
+          ROUTINE_TEMPLATES_MODE="$2"
+          ;;
+        *)
+          echo "invalid value for --routine-templates: $2 (expected managed or preserve)" >&2
+          exit 2
+          ;;
+      esac
+      shift 2
       ;;
     -h|--help)
       usage
@@ -279,9 +296,11 @@ require_source_file "$SOURCE_ROOT/config/quickadd-rollups.json"
 require_source_file "$SOURCE_ROOT/config/obsidian/calendar.json"
 require_source_file "$SOURCE_ROOT/config/obsidian/quickadd.json"
 require_source_file "$SCRIPT_DIR/configure_optional_integrations.py"
-require_source_file "$SOURCE_ROOT/templates/每日记录.md"
-require_source_file "$SOURCE_ROOT/templates/每周记录.md"
-require_source_file "$SOURCE_ROOT/templates/每月记录.md"
+if [ "$ROUTINE_TEMPLATES_MODE" = managed ]; then
+  require_source_file "$SOURCE_ROOT/templates/每日记录.md"
+  require_source_file "$SOURCE_ROOT/templates/每周记录.md"
+  require_source_file "$SOURCE_ROOT/templates/每月记录.md"
+fi
 require_source_dir "$SOURCE_ROOT/automation/quickadd"
 require_source_dir "$SOURCE_ROOT/skills/sunday-note-context"
 require_source_file "$SOURCE_ROOT/skills/sunday-note-context/assets/个人上下文.md"
@@ -314,9 +333,11 @@ preflight_local_file "$VAULT_ROOT/.gitignore"
 preflight_append_file "$VAULT_ROOT/.stignore"
 preflight_local_file "$VAULT_ROOT/.sunday-note-agent/config/quickadd-rollups.json"
 preflight_local_file "$VAULT_ROOT/个人上下文.md"
-preflight_local_file "$VAULT_ROOT/个人模板/每日记录.md"
-preflight_managed_file "$VAULT_ROOT/个人模板/每周记录.md"
-preflight_managed_file "$VAULT_ROOT/个人模板/每月记录.md"
+if [ "$ROUTINE_TEMPLATES_MODE" = managed ]; then
+  preflight_local_file "$VAULT_ROOT/个人模板/每日记录.md"
+  preflight_managed_file "$VAULT_ROOT/个人模板/每周记录.md"
+  preflight_managed_file "$VAULT_ROOT/个人模板/每月记录.md"
+fi
 
 preflight_managed_dir "$VAULT_ROOT/.agents/skills/sunday-note-ingest"
 preflight_managed_dir "$VAULT_ROOT/.agents/skills/sunday-note-lint"
@@ -332,9 +353,13 @@ copy_managed_file "$RENDERED_AGENTS" "$VAULT_ROOT/AGENTS.md"
 copy_if_missing "$SCAFFOLD_DIR/首页.md" "$VAULT_ROOT/首页.md"
 copy_if_missing "$SCAFFOLD_DIR/.gitignore" "$VAULT_ROOT/.gitignore"
 ensure_syncthing_ignores
-copy_if_missing "$SOURCE_ROOT/templates/每日记录.md" "$VAULT_ROOT/个人模板/每日记录.md"
-copy_managed_file "$SOURCE_ROOT/templates/每周记录.md" "$VAULT_ROOT/个人模板/每周记录.md"
-copy_managed_file "$SOURCE_ROOT/templates/每月记录.md" "$VAULT_ROOT/个人模板/每月记录.md"
+if [ "$ROUTINE_TEMPLATES_MODE" = managed ]; then
+  copy_if_missing "$SOURCE_ROOT/templates/每日记录.md" "$VAULT_ROOT/个人模板/每日记录.md"
+  copy_managed_file "$SOURCE_ROOT/templates/每周记录.md" "$VAULT_ROOT/个人模板/每周记录.md"
+  copy_managed_file "$SOURCE_ROOT/templates/每月记录.md" "$VAULT_ROOT/个人模板/每月记录.md"
+else
+  echo "已保留父 vault 的 Routine 模板与 Calendar 模板设置。"
+fi
 ensure_personal_context_file
 
 copy_managed_dir "$SOURCE_ROOT/skills/sunday-note-context" "$VAULT_ROOT/.agents/skills/sunday-note-context"
@@ -350,7 +375,11 @@ fi
 copy_if_missing "$SOURCE_ROOT/config/quickadd-rollups.json" "$VAULT_ROOT/.sunday-note-agent/config/quickadd-rollups.json"
 
 if [ -n "$OPTIONAL_CONFIG_PYTHON" ]; then
-  if ! "$OPTIONAL_CONFIG_PYTHON" "$SCRIPT_DIR/configure_optional_integrations.py" --vault-root "$VAULT_ROOT"; then
+  optional_config_args=(--vault-root "$VAULT_ROOT")
+  if [ "$ROUTINE_TEMPLATES_MODE" = preserve ]; then
+    optional_config_args+=(--skip-calendar)
+  fi
+  if ! "$OPTIONAL_CONFIG_PYTHON" "$SCRIPT_DIR/configure_optional_integrations.py" "${optional_config_args[@]}"; then
     echo "可选集成配置失败；核心安装已完成，Calendar/QuickAdd 未全部配置。" >&2
   fi
 else
@@ -358,6 +387,10 @@ else
   echo "可选工作流未配置：QuickAdd Routine 自动化（未找到 python3 或 python；核心安装已完成）。"
 fi
 echo "Installed or updated Sunday Note vault at: $VAULT_ROOT"
-echo "Managed rules, skills, and Routine files were refreshed from: $PROJECT_DIR_NAME"
+if [ "$ROUTINE_TEMPLATES_MODE" = managed ]; then
+  echo "Managed rules, skills, and Routine files were refreshed from: $PROJECT_DIR_NAME"
+else
+  echo "Managed rules and skills were refreshed from: $PROJECT_DIR_NAME"
+fi
 echo "Vault-local content and unmanaged configuration were preserved."
 echo "安装期间应关闭 Obsidian；如果刚才正在运行，请退出后重新运行安装器，再启动 Obsidian。"
