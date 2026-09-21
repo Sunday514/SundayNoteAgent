@@ -25,7 +25,6 @@ function request(method, params) {
     parent.postMessage({jsonrpc: '2.0', id, method, params}, '*');
   });
 }
-function closeIfDone(){if(!root.children.length){error.textContent='';notify('ui/notifications/size-changed',{height:0});notify('ui/notifications/request-teardown');}}
 function render(data) {
   sessionId = data.session_id;
   root.replaceChildren();
@@ -38,6 +37,7 @@ function render(data) {
     summary.textContent = item.summary;
     if (item.title) row.append(title);
     if (item.summary) row.append(summary);
+    const done = ['submitted','ignored','acknowledged'].includes(item.status);
     if (item.pending) {
       const status = document.createElement('p');
       status.textContent = '提交结果待核实，请检查原会话；不会重复发送。';
@@ -49,6 +49,7 @@ function render(data) {
     if (item.options?.length) {
       choices = document.createElement('fieldset');
       choices.className = 'options';
+      choices.disabled = done;
       choices.setAttribute('aria-label', '处理方案');
       for (const text of item.options) {
         const label = document.createElement('label');
@@ -56,6 +57,7 @@ function render(data) {
         input.type = 'radio';
         input.name = 'choice-' + item.id;
         input.value = text;
+        input.checked = text === item.selection;
         const caption = document.createElement('span');
         caption.textContent = text;
         label.append(input, caption);
@@ -69,6 +71,7 @@ function render(data) {
       const button = document.createElement('button');
       button.textContent = label;
       button.type = 'button';
+      button.disabled = done;
       button.addEventListener('click', async () => {
         const selection = choices?.querySelector('input:checked')?.value || '';
         if (action === 'confirm' && choices && !selection) { choices.querySelector('input').focus(); return; }
@@ -82,8 +85,6 @@ function render(data) {
           }});
           if (result.isError) throw new Error(result.content?.[0]?.text || '操作失败');
           if (!result.structuredContent?.done) throw new Error('操作未确认');
-          row.remove();
-          closeIfDone();
         } catch (e) {
           error.textContent = e.message;
           buttons.forEach(b => b.disabled = false);
@@ -95,7 +96,6 @@ function render(data) {
     row.append(actions);
     root.append(row);
   }
-  closeIfDone();
 }
 window.addEventListener('message', event => {
   if (event.source !== parent) return;

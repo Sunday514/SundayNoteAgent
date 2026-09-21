@@ -70,6 +70,34 @@ class MonitorTests(unittest.TestCase):
         self.config["project_roots"] = [str(self.project), str(self.vault)]
         self.assertTrue(m.project_allowed(self.config, str(self.vault)))
 
+    def test_git_worktree_scope(self):
+        def git(*args):
+            return subprocess.run(["git", *map(str, args)], check=True, capture_output=True)
+        git("init", self.project)
+        git("-C", self.project, "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+            "commit", "--allow-empty", "-m", "fixture")
+        linked = self.base / "linked"
+        git("-C", self.project, "worktree", "add", "--detach", linked)
+        (linked / "src").mkdir()
+        clone = self.base / "clone"
+        git("clone", self.project, clone)
+        for cwd in (linked, linked / "src"):
+            self.assertTrue(m.project_allowed(self.config, str(cwd)))
+        self.assertFalse(m.project_allowed(self.config, str(clone)))
+        self.assertFalse(m.project_allowed({**self.config, "project_roots": []}, str(linked)))
+        self.assertTrue(m.project_allowed({**self.config, "project_roots": [str(linked)]}, str(self.project)))
+        with patch.dict(os.environ, {"GIT_DIR": str(self.project / ".git")}):
+            self.assertFalse(m.project_allowed(self.config, str(clone)))
+        self.assertTrue(self.collect("Stop", cwd=str(linked), last_assistant_message="changed code"))
+        calls = []
+        m.worker(self.cp, lambda c, e: (calls.append(e) or empty(), 0))
+        self.assertEqual(calls[0]["cwd"], str(linked))
+
+    def test_git_scope_probe_failure(self):
+        with patch.object(m.subprocess, "run", side_effect=subprocess.TimeoutExpired("git", 0.5)):
+            self.assertFalse(m.project_allowed(self.config, str(self.vault)))
+            self.assertTrue(m.project_allowed(self.config, str(self.project)))
+
     def test_removed_project_is_not_evaluated(self):
         self.collect("Stop", last_assistant_message="answer")
         m.atomic(self.cp, {**self.config, "project_roots": []})
@@ -470,7 +498,9 @@ else: raise SystemExit(1)
                 self.assertFalse(send.call_args.args[2].startswith(feedback.MARKER))
             rendered = widget.call(self.config, feedback.RENDER_TOOL,
                                    {"session_id": "s", "finding_ids": [item["id"]]})
-            self.assertEqual(rendered["structuredContent"]["items"], [])
+            outcome = rendered["structuredContent"]["items"][0]
+            self.assertEqual(outcome["status"], "submitted" if action == "confirm" else "ignored")
+            self.assertEqual(outcome["selection"], args.get("selection", ""))
 
     def test_widget_uncertain_submission_is_not_repeated(self):
         item = self.finding()

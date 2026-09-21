@@ -52,15 +52,16 @@ def call(config, name, args):
                         text.strip() for text in (i.get("reason", ""), i.get("instruction", ""))
                         if text.strip())),
                     "pending": i["status"] == "submitting",
+                    "status": i["status"], "selection": i.get("selection", ""),
                     "options": i.get("options", [])} for i in items
-                   if i["status"] in ("new", "submitting")]
+                   if i["status"] in ("new", "submitting", "submitted", "ignored", "acknowledged")]
         return {"content": [], "structuredContent": {"session_id": session_id, "items": visible}}
     if name != ACTION_TOOL:
         raise ValueError("未知工具")
     with lock(root / "decision.lock"):
         item = finding(config, root, session_id, args["finding_id"])
         if item["status"] in ("submitted", "ignored", "acknowledged"):
-            return {"content": [], "structuredContent": {"done": True}}
+            return {"content": [], "structuredContent": {"done": True, "status": item["status"], "selection": item.get("selection", "")}}
         if item["status"] != "new":
             raise ValueError("此建议的提交结果未确认，请先检查原会话，避免重复提交")
         action = args["action"]
@@ -84,7 +85,7 @@ def call(config, name, args):
         else:
             raise ValueError("未知操作")
         atomic(root / "findings" / (item["id"] + ".json"), item)
-    return {"content": [], "structuredContent": {"done": True}}
+    return {"content": [], "structuredContent": {"done": True, "status": item["status"], "selection": item.get("selection", "")}}
 
 
 def dispatch(config, request):

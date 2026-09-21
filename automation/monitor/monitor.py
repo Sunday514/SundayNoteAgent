@@ -104,13 +104,33 @@ def source_for(event):
             "exchange_sha256": digest([event.get("prompt", ""), event.get("last_assistant_message", "")])}
 
 
+def git_common_dir(path):
+    """Resolve local repository identity without inherited Git overrides."""
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    env["GIT_OPTIONAL_LOCKS"] = "0"
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(path), "rev-parse", "--path-format=absolute", "--git-common-dir"],
+            env=env, capture_output=True, text=True, timeout=0.5, check=True)
+        value = result.stdout.strip()
+        return Path(value).resolve() if value and Path(value).is_absolute() else None
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
 def project_allowed(config, cwd):
     roots = config.get("project_roots", [config["vault"]])
     if not isinstance(roots, list) or not isinstance(cwd, str) or not Path(cwd).is_absolute():
         return False
     project = Path(cwd).resolve()
-    return any(isinstance(root, str) and Path(root).is_absolute()
-               and project.is_relative_to(Path(root).resolve()) for root in roots)
+    roots = [Path(root).resolve() for root in roots
+             if isinstance(root, str) and Path(root).is_absolute()]
+    if any(project.is_relative_to(root) for root in roots):
+        return True
+    if not roots:
+        return False
+    common = git_common_dir(project)
+    return common is not None and any(git_common_dir(root) == common for root in roots)
 
 
 def collect(config, payload):
