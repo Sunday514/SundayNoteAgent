@@ -45,7 +45,7 @@ function render(data) {
       root.append(row);
       continue;
     }
-    let choices = null;
+    let choices = null, otherRadio = null, otherText = null;
     if (item.options?.length) {
       choices = document.createElement('fieldset');
       choices.className = 'options';
@@ -57,12 +57,31 @@ function render(data) {
         input.type = 'radio';
         input.name = 'choice-' + item.id;
         input.value = text;
-        input.checked = text === item.selection;
+        input.checked = !item.other && text === item.selection;
         const caption = document.createElement('span');
         caption.textContent = text;
         label.append(input, caption);
         choices.append(label);
       }
+      const otherLabel = document.createElement('label');
+      otherRadio = document.createElement('input');
+      otherRadio.type = 'radio';
+      otherRadio.name = 'choice-' + item.id;
+      otherRadio.checked = !!item.other;
+      otherLabel.append(otherRadio, document.createTextNode('其他'));
+      otherText = document.createElement('textarea');
+      otherText.setAttribute('aria-label', '其他方案');
+      otherText.placeholder = '请输入你的判断或处理方式';
+      otherText.rows = 2;
+      otherText.maxLength = 4000;
+      otherText.style.cssText = 'width:100%;font:inherit;resize:vertical';
+      otherText.value = item.other ? item.selection : '';
+      otherText.hidden = !otherRadio.checked;
+      choices.addEventListener('change', () => {
+        otherText.hidden = !otherRadio.checked;
+        if (otherRadio.checked) otherText.focus();
+      });
+      choices.append(otherLabel, otherText);
       row.append(choices);
     }
     const actions = document.createElement('div');
@@ -73,7 +92,9 @@ function render(data) {
       button.type = 'button';
       button.disabled = done;
       button.addEventListener('click', async () => {
-        const selection = choices?.querySelector('input:checked')?.value || '';
+        const other = !!otherRadio?.checked;
+        const selection = other ? otherText.value.trim() : choices?.querySelector('input:checked')?.value || '';
+        if (action === 'confirm' && other && !selection) { otherText.focus(); return; }
         if (action === 'confirm' && choices && !selection) { choices.querySelector('input').focus(); return; }
         const buttons = row.querySelectorAll('button');
         buttons.forEach(b => b.disabled = true);
@@ -81,7 +102,7 @@ function render(data) {
         error.textContent = '';
         try {
           const result = await request('tools/call', {name: 'decide_monitor_feedback', arguments: {
-            session_id: sessionId, finding_id: item.id, action, selection
+            session_id: sessionId, finding_id: item.id, action, selection, other
           }});
           if (result.isError) throw new Error(result.content?.[0]?.text || '操作失败');
           if (!result.structuredContent?.done) throw new Error('操作未确认');

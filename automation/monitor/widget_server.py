@@ -24,7 +24,7 @@ TOOLS = [
      "inputSchema": {"type": "object", "properties": {
          "session_id": {"type": "string"}, "finding_id": {"type": "string"},
          "action": {"type": "string", "enum": ["confirm", "ignore"]},
-         "selection": {"type": "string"}}, "required": ["session_id", "finding_id", "action"],
+         "selection": {"type": "string"}, "other": {"type": "boolean"}}, "required": ["session_id", "finding_id", "action"],
          "additionalProperties": False},
      "_meta": {"ui": {"visibility": ["app"]}}},
 ]
@@ -53,6 +53,7 @@ def call(config, name, args):
                         if text.strip())),
                     "pending": i["status"] == "submitting",
                     "status": i["status"], "selection": i.get("selection", ""),
+                    "other": i.get("other", False),
                     "options": i.get("options", [])} for i in items
                    if i["status"] in ("new", "submitting", "submitted", "ignored", "acknowledged")]
         return {"content": [], "structuredContent": {"session_id": session_id, "items": visible}}
@@ -70,8 +71,15 @@ def call(config, name, args):
         elif action == "confirm":
             options = item.get("options", [])
             choice = args.get("selection", "")
-            if (options and choice not in options) or (not options and choice):
+            other = args.get("other", False)
+            if not isinstance(choice, str) or not isinstance(other, bool):
+                raise ValueError("无效选择")
+            if other:
+                choice = choice.strip()
+            if (other and (not options or not choice or len(choice) > 4000)) or (not other and (
+                    (options and choice not in options) or (not options and choice))):
                 raise ValueError("请选择有效方案")
+            item.update(selection=choice, other=other)
             if item["instruction"].strip():
                 item.update(status="submitting", selection=choice)
                 atomic(root / "findings" / (item["id"] + ".json"), item)

@@ -411,8 +411,11 @@ else: raise SystemExit(1)
         self.assertIn(feedback.RENDER_TOOL, argv[-1])
         self.assertIn("不是用户授权", argv[-1])
         self.assertIn(item["id"], argv[-1])
-        self.assertNotIn(item["instruction"], argv[-1])
-        self.assertLess(len(argv[-1]), 1000)
+        context = json.loads(argv[-1].splitlines()[-1])["findings"][0]
+        for key in ("instruction", "evidence", "options", "project", "turn_id"):
+            self.assertEqual(context[key], item[key])
+        self.assertIn("无需读取文件", argv[-1])
+        self.assertNotIn("feedback", context)
         self.assertEqual(item["feedback"], "queued")
 
     def test_feedback_failure_and_scope(self):
@@ -423,11 +426,13 @@ else: raise SystemExit(1)
         self.assertEqual(item["feedback"], "skipped_scope")
         self.assertTrue(any(r["kind"] == "summary" for r in self.rows()))
 
-    def test_feedback_queue_failure_and_bounded_message(self):
+    def test_feedback_queue_failure_and_complete_message(self):
         item = self.finding()
         item.update(title="标题" * 1000, reason="原因" * 1000,
                     instruction="建议" * 1000, options=["选项" * 1000] * 3)
-        self.assertLess(len(feedback.message([item])), 1000)
+        context = json.loads(feedback.message([item]).splitlines()[-1])["findings"][0]
+        self.assertEqual(context["reason"], item["reason"])
+        self.assertEqual(context["options"], item["options"])
         for failure in (subprocess.CompletedProcess([], 1), subprocess.TimeoutExpired("codex", 20)):
             with patch.object(feedback.subprocess, "run") as send:
                 if isinstance(failure, Exception):
@@ -501,6 +506,21 @@ else: raise SystemExit(1)
             outcome = rendered["structuredContent"]["items"][0]
             self.assertEqual(outcome["status"], "submitted" if action == "confirm" else "ignored")
             self.assertEqual(outcome["selection"], args.get("selection", ""))
+
+    def test_widget_other_choice(self):
+        item = self.finding()
+        args = {"session_id": "s", "finding_id": item["id"], "action": "confirm", "other": True}
+        for value in ("", "  ", "x" * 4001):
+            with self.assertRaises(ValueError):
+                widget.call(self.config, widget.ACTION_TOOL, {**args, "selection": value})
+        with patch.object(widget, "queue") as send:
+            widget.call(self.config, widget.ACTION_TOOL, {**args, "selection": "  先核查调用方  "})
+        self.assertIn("先核查调用方", send.call_args.args[2])
+        view = widget.call(self.config, feedback.RENDER_TOOL,
+                           {"session_id": "s", "finding_ids": [item["id"]]})["structuredContent"]["items"][0]
+        self.assertTrue(view["other"])
+        self.assertEqual(view["selection"], "先核查调用方")
+        self.assertEqual(view["options"], item["options"])
 
     def test_widget_uncertain_submission_is_not_repeated(self):
         item = self.finding()
