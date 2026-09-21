@@ -23,7 +23,7 @@ spec.loader.exec_module(installer)
 
 
 def empty():
-    return {"summary": {k: [] for k in m.RESULT_SCHEMA["properties"]["summary"]["properties"]},
+    return {"context_updates": [], "summary": {k: [] for k in m.RESULT_SCHEMA["properties"]["summary"]["properties"]},
             "checked": [], "findings": []}
 
 
@@ -48,7 +48,7 @@ class MonitorTests(unittest.TestCase):
         return m.collect(self.config, {**self.event, "hook_event_name": kind, **kw})
 
     def rows(self):
-        return [json.loads(l) for p in (self.root / "sessions").glob("*.jsonl") for l in p.read_text().splitlines()]
+        return [json.loads(l) for p in self.root.glob("projects/*/sessions/*.jsonl") for l in p.read_text().splitlines()]
 
     def test_project_scope(self):
         alias = self.base / "alias"
@@ -83,6 +83,7 @@ class MonitorTests(unittest.TestCase):
         git("clone", self.project, clone)
         for cwd in (linked, linked / "src"):
             self.assertTrue(m.project_allowed(self.config, str(cwd)))
+            self.assertEqual(m.project_dir(self.root, str(cwd)), m.project_dir(self.root, str(self.project)))
         self.assertFalse(m.project_allowed(self.config, str(clone)))
         self.assertFalse(m.project_allowed({**self.config, "project_roots": []}, str(linked)))
         self.assertTrue(m.project_allowed({**self.config, "project_roots": [str(linked)]}, str(self.project)))
@@ -97,6 +98,21 @@ class MonitorTests(unittest.TestCase):
         with patch.object(m.subprocess, "run", side_effect=subprocess.TimeoutExpired("git", 0.5)):
             self.assertFalse(m.project_allowed(self.config, str(self.vault)))
             self.assertTrue(m.project_allowed(self.config, str(self.project)))
+
+    def test_project_context_updates_only_on_change(self):
+        event = {**self.event, "prompt": "目标已确认为只读检查", "created": 10}
+        result = empty()
+        result["context_updates"] = [{"key": "目标", "value": "只读检查", "source": {
+            "location": "s/t", "quote": "目标已确认为只读检查"}}]
+        m.finalize(self.root, self.config, event, result, 0)
+        path = m.project_dir(self.root, str(self.project)) / "context.json"
+        before = path.stat().st_mtime_ns
+        m.finalize(self.root, self.config, event, result, 0)
+        self.assertEqual(before, path.stat().st_mtime_ns)
+        self.assertEqual(m.project_context(self.root, event)["facts"]["目标"]["value"], "只读检查")
+        result["context_updates"][0]["value"] = "过时目标"
+        m.finalize(self.root, self.config, {**event, "created": 9}, result, 0)
+        self.assertEqual(before, path.stat().st_mtime_ns)
 
     def test_removed_project_is_not_evaluated(self):
         self.collect("Stop", last_assistant_message="answer")
@@ -375,7 +391,7 @@ elif a[0]=='exec':
  assert a[a.index('-m')+1]=='gpt-5.6-luna'
  text=sys.stdin.read()
  assert 'context_complete' in text
- Path(a[a.index('-o')+1]).write_text(json.dumps({'summary':{k:[] for k in ['user_requests','user_decisions','assistant_claims','observations','inferences','open_questions']},'checked':[],'findings':[]}))
+ Path(a[a.index('-o')+1]).write_text(json.dumps({'context_updates':[],'summary':{k:[] for k in ['user_requests','user_decisions','assistant_claims','observations','inferences','open_questions']},'checked':[],'findings':[]}))
 else: raise SystemExit(1)
 ''')
         fake.chmod(0o700)
