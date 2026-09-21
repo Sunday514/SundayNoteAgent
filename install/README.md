@@ -59,6 +59,8 @@ python3 .sunday-note-agent/monitor/monitor.py --config .logs/codex/config.json r
 
 widget 仅显示一段简短摘要和至多一个决策，方案用紧凑单选列表展示。推荐、建议和背景是摘要中的可选参考内容，不按分类分栏，也不要求逐类覆盖。无决策时，确认仅记为已阅；有决策时，将确认的选择通过原生队列发回同一个 A，由 A 核实后执行。忽略只更新本地状态。处理成功后保留原面板和已选方案，仅将按钮与选项禁用置灰，不追加状态文字；重新渲染时同样保持禁用。队列结果不明时保留待核实状态，不自动重发。面板操作工具仅向应用暴露，不向模型暴露。
 
+有选项时，widget 固定追加“其他”（不由 Monitor 生成）；选中后显示文本框，填写自己的判断或处理方式，不能为空，输入上限为 4000。确认后，自定义内容作为用户选择回传原会话，由主 Agent 核实后处理；面板保留输入并禁用控件。无选项时不显示“其他”。
+
 反馈轮次使用 `[SundayNote Monitor]` 标记，保持登记但不再次调用 Luna，防止循环；用户确认后的任务正常检查。`status` 显示反馈状态计数：`queued` 仅表示队列接受，不代表已渲染或已决定；`skipped_scope` 表示已移出范围，`failed` 表示未获投递成功确认，`sending` 表示可能在投递期间中断。失败不影响原始摘要，`retry` 仅重试分析队列。不另起 `resume`、修改聊天数据库或使用弹窗兜底。真实客户端的工具加载、渲染和关闭需在安装后验证。
 
 实现借鉴 [memsearch](https://github.com/zilliztech/memsearch/blob/main/docs/platforms/codex/how-it-works.md) 的隔离调用、[codex-observational-memory](https://github.com/sovorn-c/codex-observational-memory) 的来源索引和 [honcho-codex](https://github.com/rafachavantes/honcho-codex) 的按轮采集，不依赖这些服务。Hook 契约以 [Codex 官方文档](https://learn.chatgpt.com/docs/hooks) 为准。
