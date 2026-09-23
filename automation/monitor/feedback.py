@@ -46,7 +46,9 @@ def deliver(config, root, items):
         return
     try:
         record("sending")
-        queue(config, items[0]["session_id"], message(items))
+        if not items[0].get("codex"):
+            raise RuntimeError("source_codex_unavailable")
+        queue({**config, "codex": items[0]["codex"]}, items[0]["session_id"], message(items))
         record("queued")
     except (OSError, RuntimeError, subprocess.TimeoutExpired):
         record("failed")

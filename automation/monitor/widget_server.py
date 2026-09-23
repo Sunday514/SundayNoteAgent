@@ -86,7 +86,9 @@ def call(config, name, args):
                 text = ("用户已在 Monitor 面板确认：" + item["title"] + "\n选择："
                         + (choice or item["instruction"]) + "\n请核实证据后按此选择处理。完整建议："
                         + str(root / "findings" / (item["id"] + ".json")))
-                queue(config, session_id, text)
+                if not item.get("codex"):
+                    raise RuntimeError("source_codex_unavailable")
+                queue({**config, "codex": item["codex"]}, session_id, text)
                 item["status"] = "submitted"
             else:
                 item["status"] = "acknowledged"

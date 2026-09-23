@@ -20,7 +20,7 @@ import time
 
 sys.dont_write_bytecode = True
 HERE = Path(__file__).resolve().parent
-MODEL = "gpt-5.6-luna"
+MODEL = "gpt-6-luna"
 MAX_TEXT = 18000
 
 from feedback import MARKER, deliver
@@ -160,6 +160,24 @@ def project_allowed(config, cwd):
     return common is not None and any(git_common_dir(root) == common for root in roots)
 
 
+def parent_codex(proc=Path("/proc"), pid=None):
+    """Find the actual Codex executable owning this Linux Hook process."""
+    pid = os.getppid() if pid is None else pid
+    seen = set()
+    while pid > 1 and pid not in seen:
+        seen.add(pid)
+        try:
+            directory = proc / str(pid)
+            executable = (directory / "exe").resolve(strict=True)
+            if executable.name == "codex":
+                return str(executable)
+            status = (directory / "status").read_text()
+            pid = int(next(line.split()[1] for line in status.splitlines() if line.startswith("PPid:")))
+        except (OSError, ValueError, StopIteration):
+            break
+    return ""
+
+
 def collect(config, payload):
     if os.environ.get("SUNDAY_MONITOR_ACTIVE") or payload.get("agent_id") or payload.get("parent_thread_id"):
         return False
@@ -205,6 +223,8 @@ def collect(config, payload):
                 if k in ("prompt", "last_assistant_message") and len(payload[k]) > MAX_TEXT:
                     event["truncated"] = True
         event.setdefault("created", time.time())
+        if not event.get("codex"):
+            event["codex"] = config.get("codex", "")
         event["ready"] = event.get("ready", False) or event_name == "Stop"
         if event == before:
             return False
@@ -446,6 +466,9 @@ def recent_findings(config, event):
 
 
 def evaluate(config, event):
+    config = {**config, "codex": event.get("codex", "")}
+    if not config["codex"] or not os.access(config["codex"], os.X_OK):
+        raise RuntimeError("source_codex_unavailable")
     with tempfile.TemporaryDirectory(prefix="sunday-monitor-") as tmp:
         scratch = Path(tmp)
         env = child_env(scratch, config)
@@ -525,13 +548,15 @@ def finalize(root, config, event, result, elapsed):
         if not path.exists():
             atomic(path, {**item, "id": fid, "evidence": evidence, "status": "new",
                           "session_id": event["session_id"], "turn_id": event["turn_id"],
-                          "project": event["cwd"], "created": time.time(), "feedback": "pending"})
+                          "project": event["cwd"], "codex": event.get("codex", ""),
+                          "created": time.time(), "feedback": "pending"})
             findings.append(fid)
     append_record(root, event, {"kind": "summary", "source": source_for(event),
                   "context_complete": bool(event.get("prompt") and event.get("last_assistant_message") and not event.get("truncated")),
                   "summary_scope": "source_conversation",
                   "summary": {k: v for k, v in result["summary"].items() if v and k != "inferences"},
-                  "findings": findings, "model": MODEL, "model_generated": True, "seconds": elapsed})
+                  "findings": findings, "codex": event.get("codex", ""),
+                  "model": MODEL, "model_generated": True, "seconds": elapsed})
     return findings
 
 
@@ -580,7 +605,7 @@ def worker(config_path, evaluator=evaluate):
                             [read_json(root / "findings" / (fid + ".json")) for fid in new])
             except (RuntimeError, ValueError, OSError) as exc:
                 with lock(root / "queue.lock"):
-                    if isinstance(exc, ValueError) or str(exc) in ("timeout", "codex_failed", "result_too_large"):
+                    if isinstance(exc, ValueError) or str(exc) in ("timeout", "codex_failed", "result_too_large", "source_codex_unavailable"):
                         fresh = read_json(path, {})
                         if fresh.get("revision") != event.get("revision"):
                             continue
@@ -614,7 +639,7 @@ def main():
                     atomic(path, project_context(root, event))
     elif args.command == "hook":
         try:
-            ready = collect(config, json.loads(sys.stdin.read(150000)))
+            ready = collect({**config, "codex": parent_codex()}, json.loads(sys.stdin.read(150000)))
             if ready:
                 spawn(args.config, "work")
         except (ValueError, OSError):

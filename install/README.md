@@ -65,9 +65,11 @@ widget 仅显示一段简短摘要和至多一个决策，方案用紧凑单选�
 
 反馈轮次使用 `[SundayNote Monitor]` 标记，保持登记但不再次调用 Luna，防止循环；用户确认后的任务正常检查。`status` 显示反馈状态计数：`queued` 仅表示队列接受，不代表已渲染或已决定；`skipped_scope` 表示已移出范围，`failed` 表示未获投递成功确认，`sending` 表示可能在投递期间中断。失败不影响原始摘要，`retry` 仅重试分析队列。不另起 `resume`、修改聊天数据库或使用弹窗兜底。真实客户端的工具加载、渲染和关闭需在安装后验证。
 
+Codex 可执行文件由 Linux Hook 的进程祖先自动识别，按轮次保存；检查、建议展示及用户确认回传均沿用来源程序，不采用安装时 PATH 中的 CLI。App 与独立 CLI 会话可以使用不同版本。无法识别或来源程序不可执行时记录失败，不静默切换另一版本；没有来源路径的旧待处理记录也不猜测执行程序。这只统一可执行文件，不代表连接到同一个 App Server 实例。
+
 实现借鉴 [memsearch](https://github.com/zilliztech/memsearch/blob/main/docs/platforms/codex/how-it-works.md) 的隔离调用、[codex-observational-memory](https://github.com/sovorn-c/codex-observational-memory) 的来源索引和 [honcho-codex](https://github.com/rafachavantes/honcho-codex) 的按轮采集，不依赖这些服务。Hook 契约以 [Codex 官方文档](https://learn.chatgpt.com/docs/hooks) 为准。
 
-Monitor 默认使用 `gpt-5.6-luna` / `xhigh`，每轮硬上限 10 分钟。优先检查直接涉及材料和一跳关联来源，疑问已解决即停止；不会为凑建议重跑主任务。需要核对其他代码仓库时，可在本地 `.logs/codex/config.json` 的 `reference_roots` 数组中列出明确目录；它只限定检索指导和可接受的文件证据，不是操作系统级读取隔离。不要填用户主目录或文件系统根目录。未配置时仅接受当前项目和 Vault 的文件引用，引用必须是连续原文。
+Monitor 默认使用 `gpt-6-luna` / `xhigh`，每轮硬上限 10 分钟。优先检查直接涉及材料和一跳关联来源，疑问已解决即停止；不会为凑建议重跑主任务。需要核对其他代码仓库时，可在本地 `.logs/codex/config.json` 的 `reference_roots` 数组中列出明确目录；它只限定检索指导和可接受的文件证据，不是操作系统级读取隔离。不要填用户主目录或文件系统根目录。未配置时仅接受当前项目和 Vault 的文件引用，引用必须是连续原文。
 
 同一脚本同时用于首次安装和更新：补建缺失的 vault 骨架和本地基线文件，并用当前 checkout 覆盖安装器托管内容。它不移动、重命名或整理已有个人内容，也不自动执行 Git 操作。
 

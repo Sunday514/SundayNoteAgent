@@ -41,7 +41,7 @@ class MonitorTests(unittest.TestCase):
         self.cp = self.base / "config.json"
         m.atomic(self.cp, self.config)
         self.root = m.root_for(self.config)
-        self.event = {"session_id": "s", "turn_id": "t", "cwd": str(self.project),
+        self.event = {"session_id": "s", "turn_id": "t", "cwd": str(self.project), "codex": "codex",
                       "transcript_path": str(self.base / "transcript.jsonl")}
 
     def collect(self, kind, **kw):
@@ -49,6 +49,34 @@ class MonitorTests(unittest.TestCase):
 
     def rows(self):
         return [json.loads(l) for p in self.root.glob("projects/*/sessions/*.jsonl") for l in p.read_text().splitlines()]
+
+    def test_source_codex_ancestry(self):
+        proc = self.base / "proc"
+        app = self.base / "app" / "codex"
+        app.parent.mkdir()
+        app.touch()
+        shell = self.base / "sh"
+        shell.touch()
+        for pid, parent, exe in ((30, 20, shell), (20, 1, app)):
+            directory = proc / str(pid)
+            directory.mkdir(parents=True)
+            (directory / "exe").symlink_to(exe)
+            (directory / "status").write_text(f"PPid:\t{parent}\n")
+        self.assertEqual(m.parent_codex(proc, 30), str(app))
+        self.assertEqual(m.parent_codex(proc, 99), "")
+
+    def test_source_codex_persisted_and_used(self):
+        self.config["codex"] = "/source/app/codex"
+        self.collect("Stop", last_assistant_message="ok")
+        event = m.read_json(next((self.root / "queue").glob("*.json")))
+        self.assertEqual(event["codex"], "/source/app/codex")
+        self.event["codex"] = event["codex"]
+        item = self.finding()
+        with patch.object(feedback.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)) as send:
+            feedback.deliver({**self.config, "codex": "/wrong/codex"}, self.root, [item])
+        self.assertEqual(send.call_args.args[0][0], "/source/app/codex")
+        with self.assertRaisesRegex(RuntimeError, "source_codex_unavailable"):
+            m.evaluate(self.config, {**event, "codex": ""})
 
     def test_project_scope(self):
         alias = self.base / "alias"
@@ -388,14 +416,15 @@ elif a[0]=='sandbox':
 elif a[0]=='exec':
  assert '--ephemeral' in a and '--ignore-user-config' in a
  assert 'features.hooks=false' in a and 'agents.enabled=false' in a
- assert a[a.index('-m')+1]=='gpt-5.6-luna'
+ assert a[a.index('-m')+1]=='gpt-6-luna'
  text=sys.stdin.read()
  assert 'context_complete' in text
  Path(a[a.index('-o')+1]).write_text(json.dumps({'context_updates':[],'summary':{k:[] for k in ['user_requests','user_decisions','assistant_claims','observations','inferences','open_questions']},'checked':[],'findings':[]}))
 else: raise SystemExit(1)
 ''')
         fake.chmod(0o700)
-        m.atomic(self.cp, {**self.config,"codex":str(fake)})
+        self.config["codex"] = str(fake)
+        m.atomic(self.cp, self.config)
         self.collect("UserPromptSubmit",prompt="thanks")
         r = subprocess.run([sys.executable,str(ROOT/"automation/monitor/monitor.py"),"--config",str(self.cp),"hook"],
                            input=json.dumps({**self.event,"hook_event_name":"Stop","last_assistant_message":"ok"}),

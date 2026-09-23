@@ -123,7 +123,7 @@ def configure(vault, codex_home, applications, uninstall=False, proxy_url=None):
                 shutil.rmtree(p)
         print("Monitor 已停用并移除自身 Hook、MCP 注册和托管副本；日志保留。")
         return
-    needed = ["codex", "rg"]
+    needed = ["rg"]
     missing = [name for name in needed if not shutil.which(name)]
     if missing:
         raise ValueError("缺少依赖：" + ", ".join(missing))
@@ -141,7 +141,8 @@ def configure(vault, codex_home, applications, uninstall=False, proxy_url=None):
     local_config.setdefault("project_roots", [str(vault.resolve())])
     if proxy_url is not None:
         local_config["proxy_url"] = proxy_url
-    atomic(config_path, {**local_config, "vault": str(vault), "codex": shutil.which("codex"),
+    local_config.pop("codex", None)
+    atomic(config_path, {**local_config, "vault": str(vault),
                         "skill": str(skill / "SKILL.md"),
                         "query": str(SOURCE / "skills" / "sunday-note-query" / "scripts" / "query_search.py")})
     argv = [sys.executable, str(runtime / "monitor.py"), "--config", str(config_path)]
