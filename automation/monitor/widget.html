@@ -7,6 +7,7 @@ h3{font-size:13px;font-weight:600;margin:0 0 3px;overflow-wrap:anywhere}p{margin
 button{font:inherit;border:1px solid light-dark(#ddd,#555);border-radius:5px;padding:3px 10px;color:inherit;background:light-dark(#fff,#292929);cursor:pointer;min-height:28px}
 .options{border:0;padding:0;margin:0 0 6px;min-width:0}.options label{display:flex;align-items:flex-start;gap:7px;padding:3px 5px;cursor:pointer;overflow-wrap:anywhere;border-radius:4px}.options label:hover,.options label:has(input:checked){background:light-dark(#f1f1f1,#333)}.options input{flex:none;margin:3px 0 0;accent-color:light-dark(#333,#ddd)}.options span{min-width:0}
 button:first-child{background:light-dark(#242424,#eee);color:light-dark(#fff,#242424)}
+.summary{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .actions{display:flex;justify-content:flex-end;gap:6px}.error{color:light-dark(#b42318,#ffb4a9);margin:4px 10px}.error:empty{display:none}button:disabled{opacity:.5;cursor:default}
 </style></head><body><main id="items"></main><p id="error" role="status" class="error"></p>
 <script>
@@ -32,26 +33,64 @@ function render(data) {
   for (const item of data.items) {
     const row = document.createElement('article');
     const title = document.createElement('h3');
-    title.textContent = item.title;
+    title.textContent = `Monitor · ${item.findings.length} 条发现`;
     const summary = document.createElement('p');
+    summary.className = 'summary';
     summary.textContent = item.summary;
-    if (item.title) row.append(title);
+    row.append(title);
     if (item.summary) row.append(summary);
+    let fullText = item.copy_text;
+    const details = document.createElement('details');
+    const caption = document.createElement('summary');
+    caption.textContent = '展开完整发现与依据';
+    details.append(caption);
+    for (const finding of item.findings) {
+      const heading = document.createElement('h3');
+      heading.textContent = finding.title;
+      const reason = document.createElement('p');
+      reason.textContent = finding.reason;
+      details.append(heading, reason);
+      for (const evidence of finding.evidence) {
+        const text = document.createElement('p');
+        text.textContent = evidence.location + '\n' + evidence.quote;
+        details.append(text);
+      }
+    }
+    row.append(details);
+    const copy = document.createElement('button');
+    copy.textContent = '复制完整反馈';
+    copy.addEventListener('click', async () => {
+      try { await navigator.clipboard.writeText(fullText); }
+      catch (_) {
+        const area = document.createElement('textarea');
+        area.value = fullText;
+        row.append(area); area.select();
+        if (document.execCommand('copy')) area.remove();
+        else error.textContent = '自动复制不可用，完整内容已选中，可手动复制。';
+      }
+    });
+    row.append(copy);
+    if (item.decision) {
+      const question = document.createElement('p');
+      question.textContent = item.decision.question;
+      row.append(question);
+    }
     const done = ['submitted','ignored','acknowledged'].includes(item.status);
-    if (item.pending) {
+    if (item.status === 'submitting') {
       const status = document.createElement('p');
-      status.textContent = '提交结果待核实，请检查原会话；不会重复发送。';
+      status.textContent = '提交结果待核实，请检查原会话；不会重复发送。' + (item.submission_error || '');
       row.append(status);
       root.append(row);
       continue;
     }
     let choices = null, otherRadio = null, otherText = null;
-    if (item.options?.length) {
+    const options = item.decision?.options || [];
+    if (options.length) {
       choices = document.createElement('fieldset');
       choices.className = 'options';
       choices.disabled = done;
       choices.setAttribute('aria-label', '处理方案');
-      for (const text of item.options) {
+      for (const text of options) {
         const label = document.createElement('label');
         const input = document.createElement('input');
         input.type = 'radio';
@@ -86,7 +125,10 @@ function render(data) {
     }
     const actions = document.createElement('div');
     actions.className = 'actions';
-    for (const [action, label] of [['confirm', '确认'], ['ignore', '忽略']]) {
+    const saved = document.createElement('span');
+    saved.textContent = item.status === 'confirmed' ? '已确认' : '';
+    actions.append(saved);
+    for (const [action, label] of [['process', '处理'], ['confirm', '确认'], ['ignore', '忽略']]) {
       const button = document.createElement('button');
       button.textContent = label;
       button.type = 'button';
@@ -94,9 +136,9 @@ function render(data) {
       button.addEventListener('click', async () => {
         const other = !!otherRadio?.checked;
         const selection = other ? otherText.value.trim() : choices?.querySelector('input:checked')?.value || '';
-        if (action === 'confirm' && other && !selection) { otherText.focus(); return; }
-        if (action === 'confirm' && choices && !selection) { choices.querySelector('input').focus(); return; }
-        const buttons = row.querySelectorAll('button');
+        if (action !== 'ignore' && other && !selection) { otherText.focus(); return; }
+        if (action === 'process' && choices && !selection) { choices.querySelector('input').focus(); return; }
+        const buttons = actions.querySelectorAll('button');
         buttons.forEach(b => b.disabled = true);
         if (choices) choices.disabled = true;
         error.textContent = '';
@@ -104,8 +146,18 @@ function render(data) {
           const result = await request('tools/call', {name: 'decide_monitor_feedback', arguments: {
             session_id: sessionId, finding_id: item.id, action, selection, other
           }});
-          if (result.isError) throw new Error(result.content?.[0]?.text || '操作失败');
+          if (result.structuredContent?.copy_text) fullText = result.structuredContent.copy_text;
+          if (result.isError) {
+            error.textContent = result.content?.[0]?.text || '操作失败';
+            if (result.structuredContent?.retryable === false) return;
+            throw new Error(error.textContent);
+          }
           if (!result.structuredContent?.done) throw new Error('操作未确认');
+          if (result.structuredContent.status === 'confirmed') {
+            saved.textContent = '已确认';
+            buttons.forEach(b => b.disabled = false);
+            if (choices) choices.disabled = false;
+          }
         } catch (e) {
           error.textContent = e.message;
           buttons.forEach(b => b.disabled = false);

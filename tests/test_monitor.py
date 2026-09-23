@@ -27,10 +27,34 @@ spec.loader.exec_module(installer)
 
 def empty():
     return {"context_updates": [], "summary": {k: [] for k in m.SUMMARY_SCHEMA["properties"]},
-            "checked": [], "findings": []}
+            "checked": [], "feedback": None}
+
+
+def report(items, question="check and ingest", options=None):
+    return {"summary": "必要发现摘要", "findings": items,
+            "decision": {"question": question, "options": options if options is not None else ["ingest", "skip"]} if question else None}
+
+
+def raw_report(item):
+    result = {k: item[k] for k in ("summary", "findings", "decision")}
+    result = json.loads(json.dumps(result))
+    for finding in result["findings"]:
+        finding["evidence"] = [{k: e[k] for k in ("location", "quote")} for e in finding["evidence"]]
+    return result
 
 
 class MonitorTests(unittest.TestCase):
+    def test_direct_handoff(self):
+        from contracts import resolve_handoff
+        finding = {"title":"issue", "reason":"impact", "check":"review", "evidence":[{"location":"/a", "quote":"original"}]}
+        checks = [{"direction":"review", "status":"complete", "findings":[finding]}]
+        handoff = {"summary":"summary", "findings":[{"direction":"review", "index":0}], "decision":None}
+        self.assertEqual(resolve_handoff(handoff, checks)["findings"], [finding])
+        with self.assertRaises(ValueError):
+            resolve_handoff(handoff, [])
+        with self.assertRaises(ValueError):
+            resolve_handoff({**handoff, "findings":[{"direction":"review", "index":3}]}, checks)
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
@@ -315,32 +339,34 @@ class MonitorTests(unittest.TestCase):
             m.validate({"findings": []}, m.RESULT_SCHEMA)
         file = self.project / "README.md"
         file.write_text("old entry")
-        item = {"title":"entry drift", "reason":"comparison", "instruction":"check entry",
-                "options":["update document","check code"], "evidence":[{"location":str(file),"quote":"old entry"}]}
+        item = {"title":"entry drift", "reason":"comparison", "check":"consistency",
+                "evidence":[{"location":str(file),"quote":"old entry"}]}
         result = empty()
-        result["findings"] = [item]
+        result["feedback"] = report([item])
         m.validate({**{k:v for k,v in result.items() if k != "summary"},
                     "summaries": [{"turn_id":"t", "summary":result["summary"]}]}, m.RESULT_SCHEMA)
         new = m.finalize(self.root, self.config, self.event, result, 1)
         self.assertEqual(len(new), 1)
         self.assertEqual(m.finalize(self.root,self.config,self.event,result,1), new)
+        result["target"] = {"target_id": "new-revision"}
+        self.assertEqual(m.finalize(self.root, self.config, self.event, result, 1), new)
+        self.assertEqual(m.read_json(self.root / "findings" / (new[0] + ".json"))["target"], result["target"])
         item["evidence"][0]["quote"] = "nonexistent"
-        self.assertEqual(m.finalize(self.root,self.config,self.event,result,1), [])
+        with self.assertRaises(ValueError):
+            m.finalize(self.root,self.config,self.event,result,1)
 
     def test_feedback_dedup_uses_content_with_empty_title(self):
         file = self.project / "source.md"
         file.write_text("shared evidence")
-        original = {"title": "", "reason": "background", "instruction": "check source",
-                    "options": ["check", "compare"],
+        original = {"title": "", "reason": "background", "check": "main",
                     "evidence": [{"location": str(file), "quote": "shared evidence"}]}
         result = empty()
-        result["findings"] = [original]
+        result["feedback"] = report([original])
         first = m.finalize(self.root, self.config, self.event, result, 0)
         self.assertEqual(len(first), 1)
-        for field, value in (("reason", "another insight"), ("instruction", "update source"),
-                             ("options", ["update", "compare"])):
+        for field, value in (("reason", "another insight"), ("title", "update source")):
             with self.subTest(field=field):
-                result["findings"] = [{**original, field: value}]
+                result["feedback"] = report([{**original, field: value}])
                 ids = m.finalize(self.root, self.config, self.event, result, 0)
                 self.assertEqual(len(ids), 1)
                 self.assertNotEqual(ids, first)
@@ -431,11 +457,11 @@ elif a[0]=='sandbox':
  print('MONITOR_SANDBOX_OK')
 elif a[0]=='exec':
  assert '--ephemeral' in a and '--ignore-user-config' in a
- assert 'features.hooks=false' in a and 'agents.enabled=false' in a
+ assert 'features.hooks=false' in a and 'agents.enabled=true' in a
  assert a[a.index('-m')+1]=='gpt-6-luna'
  text=sys.stdin.read()
  assert 'context_complete' in text
- Path(a[a.index('-o')+1]).write_text(json.dumps({'context_updates':[],'summaries':[{'turn_id':'t','summary':{k:[] for k in ['user_requests','user_decisions','assistant_claims','observations','inferences','open_questions']}}],'checked':[],'findings':[]}))
+ Path(a[a.index('-o')+1]).write_text(json.dumps({'context_updates':[],'summaries':[{'turn_id':'t','summary':{k:[] for k in ['user_requests','user_decisions','assistant_claims','observations','inferences','open_questions']}}],'checked':[],'feedback':None}))
  print(json.dumps({'type':'turn.completed','usage':{'input_tokens':123,'output_tokens':45}}))
 else: raise SystemExit(1)
 ''')
@@ -451,16 +477,15 @@ else: raise SystemExit(1)
         while time.monotonic()<deadline and self.rows()[-1]["kind"]!="analysis":
             time.sleep(.02)
         self.assertEqual(self.rows()[-1]["kind"],"analysis")
-        self.assertEqual(self.rows()[-1]["usage"]["input_tokens"], 123)
+        self.assertEqual(self.rows()[-1]["usage"]["parent_reported"]["input_tokens"], 123)
         self.assertFalse(list((self.root/"findings").glob("*.json")))
 
     def finding(self):
         f = self.project / "a.md"
         f.write_text("evidence")
         result=empty()
-        result["findings"]=[{"title":"new relation " + str(len(list((self.root / "findings").glob("*.json")))),"reason":"reusable",
-                             "instruction":"check and ingest","options":["ingest","skip"],
-                             "evidence":[{"location":str(f),"quote":"evidence"}]}]
+        result["feedback"]=report([{"title":"new relation " + str(len(list((self.root / "findings").glob("*.json")))),"reason":"reusable",
+                             "check":"main", "evidence":[{"location":str(f),"quote":"evidence"}]}])
         fid=m.finalize(self.root,self.config,self.event,result,0)[0]
         item=m.read_json(self.root/"findings"/(fid+".json"))
         return item
@@ -475,7 +500,7 @@ else: raise SystemExit(1)
         self.assertIn("不是用户授权", argv[-1])
         self.assertIn(item["id"], argv[-1])
         context = json.loads(argv[-1].splitlines()[-1])["findings"][0]
-        for key in ("instruction", "evidence", "options", "project", "turn_id"):
+        for key in ("summary", "findings", "decision", "project", "turn_id"):
             self.assertEqual(context[key], item[key])
         self.assertIn("无需读取文件", argv[-1])
         self.assertNotIn("feedback", context)
@@ -491,11 +516,10 @@ else: raise SystemExit(1)
 
     def test_feedback_queue_failure_and_complete_message(self):
         item = self.finding()
-        item.update(title="标题" * 1000, reason="原因" * 1000,
-                    instruction="建议" * 1000, options=["选项" * 1000] * 3)
+        item.update(summary="原因" * 1000)
         context = json.loads(feedback.message([item]).splitlines()[-1])["findings"][0]
-        self.assertEqual(context["reason"], item["reason"])
-        self.assertEqual(context["options"], item["options"])
+        self.assertEqual(context["summary"], item["summary"])
+        self.assertEqual(context["decision"], item["decision"])
         for failure in (subprocess.CompletedProcess([], 1), subprocess.TimeoutExpired("codex", 20)):
             with patch.object(feedback.subprocess, "run") as send:
                 if isinstance(failure, Exception):
@@ -516,11 +540,11 @@ else: raise SystemExit(1)
         result = widget.call(self.config, feedback.RENDER_TOOL, args)
         self.assertEqual(len(result["structuredContent"]["items"]), 1)
         self.assertEqual(path.read_bytes(), before)
-        item.update(reason="", options=[])
+        item.update(decision=None)
         m.atomic(path, item)
         view = widget.call(self.config, feedback.RENDER_TOOL, args)["structuredContent"]["items"][0]
-        self.assertEqual(view["summary"], item["instruction"])
-        self.assertEqual(view["options"], [])
+        self.assertEqual(view["summary"], item["summary"])
+        self.assertIsNone(view["decision"])
         for invalid in ({**args, "session_id": "other"}, {**args, "finding_ids": ["../config"]}):
             with self.assertRaises(ValueError):
                 widget.call(self.config, feedback.RENDER_TOOL, invalid)
@@ -530,16 +554,14 @@ else: raise SystemExit(1)
     def test_one_feedback_and_reference_only_acknowledgment(self):
         item = self.finding()
         result = empty()
-        source = {k: item[k] for k in m.RESULT_SCHEMA["properties"]["findings"]["items"]["properties"]}
-        source["evidence"] = [{k: e[k] for k in ("location", "quote")} for e in item["evidence"]]
-        result["findings"] = [source, source]
-        with self.assertRaises(ValueError):
-            m.validate(result, m.RESULT_SCHEMA)
+        source = raw_report(item)
+        source["findings"] *= 2
+        m.validate_feedback(source)
         with self.assertRaises(ValueError):
             widget.call(self.config, feedback.RENDER_TOOL,
                         {"session_id": "s", "finding_ids": [item["id"], item["id"]]})
-        source.update(title="", instruction="", options=[])
-        result["findings"] = [source]
+        source["decision"] = None
+        result["feedback"] = source
         m.validate({**{k:v for k,v in result.items() if k != "summary"},
                     "summaries": [{"turn_id":"t", "summary":result["summary"]}]}, m.RESULT_SCHEMA)
         fid = m.finalize(self.root, self.config, self.event, result, 0)[0]
@@ -547,33 +569,151 @@ else: raise SystemExit(1)
             widget.call(self.config, widget.ACTION_TOOL,
                         {"session_id": "s", "finding_id": fid, "action": "confirm"})
         send.assert_not_called()
-        self.assertEqual(m.read_json(self.root / "findings" / (fid + ".json"))["status"], "acknowledged")
+        self.assertEqual(m.read_json(self.root / "findings" / (fid + ".json"))["status"], "confirmed")
+
+    def test_deferred_feedback_receipts_and_confirm_to_process(self):
+        item = self.finding()
+        args = {"session_id": "s", "finding_id": item["id"], "action": "confirm"}
+        with patch.object(widget, "queue") as send:
+            widget.call(self.config, widget.ACTION_TOOL, args)
+            send.assert_not_called()
+        event = {**self.event, "hook_event_name": "UserPromptSubmit", "prompt": "next"}
+        text = feedback.deferred_context(self.config, event)
+        self.assertIn(item["summary"], text)
+        self.assertIn('"confirmed"', text)
+        self.assertEqual(feedback.deferred_context(self.config, event), text)
+        self.assertEqual(feedback.deferred_context(self.config, {**event, "prompt": feedback.MARKER}), "")
+        self.assertEqual(feedback.deferred_context(self.config, {**event, "session_id": "other"}), "")
+        # Without proof of completion, replay on the next turn.
+        self.assertEqual(feedback.deferred_context(self.config, {**event, "turn_id": "t2"}), text)
+        Path(event["transcript_path"]).write_text('\n'.join(json.dumps(r) for r in [
+            {"type": "session_meta", "payload": {"id": "s"}},
+            {"type": "event_msg", "payload": {"type": "task_complete", "turn_id": "t"}}]))
+        # Completion cannot consume a receipt whose Hook output failed.
+        self.assertEqual(feedback.deferred_context(self.config, {**event, "turn_id": "failed-output"}), text)
+        feedback.mark_context_emitted(self.config, event)
+        self.assertEqual(feedback.deferred_context(self.config, {**event, "turn_id": "t3"}), "")
+        with patch.object(widget, "queue") as send:
+            widget.call(self.config, widget.ACTION_TOOL, {**args, "action": "process", "selection": "ingest"})
+            self.assertEqual(send.call_count, 1)
+        self.assertEqual(feedback.deferred_context(self.config, {**event, "turn_id": "t4"}), "")
+
+    def test_empty_receipt_is_stable_only_for_current_turn(self):
+        event = {**self.event, "hook_event_name": "UserPromptSubmit", "prompt": "next"}
+        self.assertEqual(feedback.deferred_context(self.config, event), "")
+        item = self.finding()
+        widget.call(self.config, widget.ACTION_TOOL,
+                    {"session_id": "s", "finding_id": item["id"], "action": "confirm"})
+        self.assertEqual(feedback.deferred_context(self.config, event), "")
+        text = feedback.deferred_context(self.config, {**event, "turn_id": "next"})
+        self.assertIn(item["summary"], text)
+        receipts = list((self.runtime / "handoffs").glob("*.json"))
+        self.assertEqual(len(receipts), 1)
+        self.assertEqual(m.read_json(receipts[0])["turn_id"], "next")
+
+    def test_consumed_replay_receipts_are_removed(self):
+        item = self.finding()
+        widget.call(self.config, widget.ACTION_TOOL,
+                    {"session_id": "s", "finding_id": item["id"], "action": "confirm"})
+        event = {**self.event, "hook_event_name": "UserPromptSubmit", "prompt": "next"}
+        feedback.deferred_context(self.config, event)
+        feedback.mark_context_emitted(self.config, event)
+        feedback.deferred_context(self.config, {**event, "turn_id": "interrupted"})
+        Path(event["transcript_path"]).write_text('\n'.join(json.dumps(r) for r in [
+            {"type": "session_meta", "payload": {"id": "s"}},
+            {"type": "event_msg", "payload": {"type": "task_complete", "turn_id": "t"}}]))
+        for turn in ("next", "last"):
+            self.assertEqual(feedback.deferred_context(self.config, {**event, "turn_id": turn}), "")
+        receipts = list((self.runtime / "handoffs").glob("*.json"))
+        self.assertEqual(len(receipts), 1)
+        self.assertEqual(m.read_json(receipts[0])["turn_id"], "last")
+
+    def test_failed_process_does_not_create_confirmation(self):
+        item = self.finding()
+        args = {"session_id": "s", "finding_id": item["id"], "action": "confirm"}
+        widget.call(self.config, widget.ACTION_TOOL, args)
+        path = self.root / "findings" / (item["id"] + ".json")
+        before = m.read_json(path)
+        with patch.object(widget, "queue", side_effect=feedback.QueueNotSent("missing executable")):
+            response = widget.call(self.config, widget.ACTION_TOOL,
+                {**args, "action": "process", "selection": "new direction", "other": True})
+        after = m.read_json(path)
+        self.assertEqual(after["action_revision"], before["action_revision"])
+        self.assertEqual(after["selection"], before["selection"])
+        self.assertEqual(after["status"], "confirmed")
+        self.assertEqual(after["draft_selection"], "new direction")
+        self.assertIn("new direction", response["structuredContent"]["copy_text"])
+
+    def test_ignore_preserves_input_and_deferred_batches(self):
+        items = [self.finding(), self.finding()]
+        with patch.object(widget, "queue") as send:
+            for item in items:
+                widget.call(self.config, widget.ACTION_TOOL, {"session_id": "s", "finding_id": item["id"],
+                            "action": "ignore", "selection": "not now", "other": True})
+            send.assert_not_called()
+        event = {**self.event, "hook_event_name": "UserPromptSubmit", "prompt": "next"}
+        text = feedback.deferred_context(self.config, event, limit=1)
+        self.assertIn("not now", text)
+        self.assertIn(items[0]["id"], text)
+        self.assertNotIn(items[1]["id"], text)
+
+    def test_hook_outputs_context_without_starting_worker(self):
+        item = self.finding()
+        widget.call(self.config, widget.ACTION_TOOL, {"session_id": "s", "finding_id": item["id"], "action": "confirm"})
+        event = {**self.event, "hook_event_name": "UserPromptSubmit", "prompt": "next"}
+        result = subprocess.run([sys.executable, str(ROOT / "automation/monitor/monitor.py"),
+            "--config", str(self.cp), "hook"], input=json.dumps(event), text=True,
+            capture_output=True, check=True, env={k:v for k,v in os.environ.items() if k != "SUNDAY_MONITOR_ACTIVE"})
+        output = json.loads(result.stdout)
+        self.assertTrue(output["continue"])
+        self.assertEqual(output["hookSpecificOutput"]["hookEventName"], "UserPromptSubmit")
+        self.assertIn(item["id"], output["hookSpecificOutput"]["additionalContext"])
+        for excluded in ({"agent_id":"child"}, {"source":"monitor"}, {"transcript_path":""}):
+            self.assertEqual(feedback.deferred_context(self.config, {**event, **excluded}), "")
+
+    def test_confirm_revision_and_legacy_not_injected(self):
+        item = self.finding()
+        args = {"session_id":"s", "finding_id":item["id"], "action":"confirm"}
+        widget.call(self.config, widget.ACTION_TOOL, args)
+        path = self.root / "findings" / (item["id"] + ".json")
+        first = m.read_json(path)["action_revision"]
+        widget.call(self.config, widget.ACTION_TOOL, args)
+        self.assertEqual(m.read_json(path)["action_revision"], first)
+        widget.call(self.config, widget.ACTION_TOOL, {**args, "selection":"later", "other":True})
+        self.assertEqual(m.read_json(path)["action_revision"], first + 1)
+        old = self.finding()
+        old.update(status="ignored")
+        m.atomic(self.root / "findings" / (old["id"] + ".json"), old)
+        event = {**self.event, "hook_event_name":"UserPromptSubmit", "prompt":"next"}
+        text = feedback.deferred_context(self.config, event)
+        self.assertIn("later", text)
+        self.assertNotIn(old["id"], text)
 
     def test_widget_decisions(self):
-        for action in ("confirm", "ignore"):
+        for action in ("process", "ignore"):
             item = self.finding()
             args = {"session_id": "s", "finding_id": item["id"], "action": action}
-            if action == "confirm":
+            if action == "process":
                 with self.assertRaises(ValueError):
                     widget.call(self.config, widget.ACTION_TOOL, args)
-                args["selection"] = item["options"][0]
+                args["selection"] = item["decision"]["options"][0]
             with patch.object(widget, "queue") as send:
                 for _ in range(2):
                     self.assertTrue(widget.call(self.config, widget.ACTION_TOOL, args)["structuredContent"]["done"])
-            self.assertEqual(send.call_count, int(action == "confirm"))
-            if action == "confirm":
+            self.assertEqual(send.call_count, int(action == "process"))
+            if action == "process":
                 self.assertEqual(send.call_args.args[1], "s")
                 self.assertIn(args["selection"], send.call_args.args[2])
                 self.assertFalse(send.call_args.args[2].startswith(feedback.MARKER))
             rendered = widget.call(self.config, feedback.RENDER_TOOL,
                                    {"session_id": "s", "finding_ids": [item["id"]]})
             outcome = rendered["structuredContent"]["items"][0]
-            self.assertEqual(outcome["status"], "submitted" if action == "confirm" else "ignored")
+            self.assertEqual(outcome["status"], "submitted" if action == "process" else "ignored")
             self.assertEqual(outcome["selection"], args.get("selection", ""))
 
     def test_widget_other_choice(self):
         item = self.finding()
-        args = {"session_id": "s", "finding_id": item["id"], "action": "confirm", "other": True}
+        args = {"session_id": "s", "finding_id": item["id"], "action": "process", "other": True}
         for value in ("", "  ", "x" * 4001):
             with self.assertRaises(ValueError):
                 widget.call(self.config, widget.ACTION_TOOL, {**args, "selection": value})
@@ -584,29 +724,56 @@ else: raise SystemExit(1)
                            {"session_id": "s", "finding_ids": [item["id"]]})["structuredContent"]["items"][0]
         self.assertTrue(view["other"])
         self.assertEqual(view["selection"], "先核查调用方")
-        self.assertEqual(view["options"], item["options"])
+        self.assertEqual(view["decision"], item["decision"])
+
+    def test_widget_not_sent_can_retry_with_complete_feedback(self):
+        item = self.finding()
+        args = {"session_id": "s", "finding_id": item["id"], "action": "process", "selection": "ingest"}
+        path = self.root / "findings" / (item["id"] + ".json")
+        with patch.object(widget, "queue", side_effect=feedback.QueueNotSent("missing executable")):
+            result = widget.call(self.config, widget.ACTION_TOOL, args)
+        self.assertTrue(result["structuredContent"]["retryable"])
+        saved = m.read_json(path)
+        self.assertEqual(saved["status"], "new")
+        self.assertEqual(saved["draft_selection"], "ingest")
+        self.assertIn("missing executable", saved["submission_error"])
+        with patch.object(widget, "queue") as send:
+            widget.call(self.config, widget.ACTION_TOOL, args)
+        self.assertNotIn("submission_error", m.read_json(path))
+        for finding in item["findings"]:
+            self.assertIn(finding["reason"], send.call_args.args[2])
+            self.assertIn(finding["evidence"][0]["quote"], send.call_args.args[2])
+
+    def test_queue_preserves_error_and_start_failure(self):
+        with patch.object(feedback.subprocess, "run", side_effect=FileNotFoundError("missing")):
+            with self.assertRaises(feedback.QueueNotSent):
+                feedback.queue(self.config, "s", "text")
+        with patch.object(feedback.subprocess, "run", return_value=subprocess.CompletedProcess([], 1, stderr="connection failed")):
+            with self.assertRaisesRegex(RuntimeError, "connection failed"):
+                feedback.queue(self.config, "s", "text")
 
     def test_widget_uncertain_submission_is_not_repeated(self):
         item = self.finding()
-        args = {"session_id": "s", "finding_id": item["id"], "action": "confirm", "selection": "ingest"}
+        args = {"session_id": "s", "finding_id": item["id"], "action": "process", "selection": "ingest"}
         with patch.object(widget, "queue", side_effect=RuntimeError("queue_failed")) as send:
-            for _ in range(2):
-                with self.assertRaises((ValueError, RuntimeError)):
-                    widget.call(self.config, widget.ACTION_TOOL, args)
+            result = widget.call(self.config, widget.ACTION_TOOL, args)
+            self.assertFalse(result["structuredContent"]["retryable"])
+            with self.assertRaises(ValueError):
+                widget.call(self.config, widget.ACTION_TOOL, args)
         self.assertEqual(send.call_count, 1)
         result = widget.call(self.config, feedback.RENDER_TOOL,
                              {"session_id": "s", "finding_ids": [item["id"]]})
-        self.assertTrue(result["structuredContent"]["items"][0]["pending"])
+        self.assertEqual(result["structuredContent"]["items"][0]["status"], "submitting")
 
     def test_widget_confirmation_without_options_and_delivery_race(self):
         item = self.finding()
-        item["options"] = []
+        item["decision"]["options"] = []
         path = self.root / "findings" / (item["id"] + ".json")
         m.atomic(path, item)
         def decide(*args):
             with patch.object(widget, "queue"):
                 widget.call(self.config, widget.ACTION_TOOL,
-                            {"session_id": "s", "finding_id": item["id"], "action": "confirm"})
+                            {"session_id": "s", "finding_id": item["id"], "action": "process"})
         with patch.object(feedback, "queue", side_effect=decide):
             feedback.deliver(self.config, self.root, [item])
         saved = m.read_json(path)
@@ -651,8 +818,8 @@ else: raise SystemExit(1)
                 self.work(lambda c,e: self.fail("concurrent worker"))
         self.assertTrue(list((self.runtime/"queue").glob("*.json")))
 
-    def batch_result(self, event, findings=None):
-        return {"context_updates": [], "checked": [], "findings": findings or [],
+    def batch_result(self, event, feedback=None):
+        return {"context_updates": [], "checked": [], "feedback": feedback,
                 "summaries": [{"turn_id": t["turn_id"], "summary": empty()["summary"]}
                               for t in event["_turns"]]}
 
@@ -682,11 +849,11 @@ else: raise SystemExit(1)
 
     def test_roll_forward_retracts_pending_finding(self):
         item = self.finding()
-        source = {k: item[k] for k in m.RESULT_SCHEMA["properties"]["findings"]["items"]["properties"]}
+        source = raw_report(item)
         self.collect("Stop", turn_id="first", last_assistant_message="first")
         def initial(c, event):
             self.collect("UserPromptSubmit", turn_id="next", prompt="already fixed")
-            return self.batch_result(event, [source]), 1
+            return self.batch_result(event, source), 1
         with patch.object(m, "deliver") as send:
             m.worker(self.cp, self.runtime, initial, wait_seconds=0)
             send.assert_not_called()
@@ -847,7 +1014,7 @@ else: raise SystemExit(1)
         self.work(lambda *_: self.fail("render invokes model"))
         with patch.object(widget, "queue") as send:
             widget.call(self.config, widget.ACTION_TOOL, {"session_id": "s", "finding_id": item["id"],
-                "action": "confirm", "selection": item["options"][0]})
+                "action": "process", "selection": item["decision"]["options"][0]})
         text = send.call_args.args[2]
         self.collect("UserPromptSubmit", turn_id="decision", prompt=text)
         self.collect("Stop", turn_id="decision", last_assistant_message="handled")
@@ -878,6 +1045,8 @@ else: raise SystemExit(1)
         self.assertTrue((runtime / "feedback.py").exists())
         self.assertTrue((runtime / "widget_server.py").exists())
         self.assertTrue((runtime / "widget.html").exists())
+        for name in ("checks", "consistency", "redundancy", "knowledge", "review"):
+            self.assertTrue((self.vault / ".agents/skills/sunday-note-monitor/references" / (name + ".md")).is_file())
         config = installer.tomllib.loads((home / "config.toml").read_text())
         self.assertIn(str(runtime / "widget_server.py"), config["mcp_servers"]["sunday_note_monitor"]["args"])
         self.assertEqual((runtime / "personal.txt").read_text(), "preserve")
@@ -899,6 +1068,226 @@ else: raise SystemExit(1)
         (other / ".logs").symlink_to(self.root.parent)
         with self.assertRaises(ValueError):
             m.root_for({"vault":str(other)})
+
+    def test_multi_finding_single_decision_contract(self):
+        f = {"title": "a", "reason": "impact", "check": "consistency",
+             "evidence": [{"location": "s/t", "quote": "fact"}]}
+        value = report([f] * 30)
+        m.validate_feedback(value)  # No business count limit.
+        value["decision"]["question"] = " "
+        with self.assertRaises(ValueError):
+            m.validate_feedback(value)
+
+    def test_copied_feedback_is_not_render_only_marker(self):
+        item = self.finding()
+        text = widget.copy_text(item)
+        self.assertFalse(text.startswith(feedback.MARKER))
+        self.assertIn("不构成执行授权", text)
+
+    def test_legacy_report_migration_preserves_user_choice(self):
+        item = self.finding()
+        path = self.root / "findings" / (item["id"] + ".json")
+        old = {k: v for k, v in item.items() if k not in ("schema_version", "summary", "findings", "decision")}
+        old.update(title="legacy", reason="impact", evidence=item["findings"][0]["evidence"],
+                   instruction="update one", options=["yes", "no"], selection="yes", status="submitted")
+        m.atomic(path, old)
+        m.migrate(self.root)
+        new = m.read_json(path)
+        self.assertEqual(new["id"], old["id"])
+        self.assertEqual(new["selection"], "yes")
+        self.assertEqual(new["status"], "submitted")
+        self.assertEqual(new["findings"][0]["evidence"], old["evidence"])
+        self.assertEqual(new["decision"]["question"], "update one")
+        self.assertNotIn("instruction", new)
+        m.migrate(self.root)
+        self.assertEqual(m.read_json(path), new)
+
+    def test_payload_limit_does_not_truncate(self):
+        with patch.object(feedback.subprocess, "run") as run:
+            with self.assertRaisesRegex(RuntimeError, "feedback_payload_too_large"):
+                feedback.queue(self.config, "s", "中" * 50000)
+            run.assert_not_called()
+
+    def test_roles_are_bounded_and_fixed(self):
+        import tomllib
+        args = m.policy(self.base, True, self.config["skill"])
+        self.assertIn("agents.max_depth=1", args)
+        self.assertIn("agents.max_concurrent_threads_per_session=3", args)
+        for name in ("consistency", "redundancy", "knowledge", "review"):
+            role = tomllib.loads((self.base / (name + ".toml")).read_text())
+            self.assertEqual(role["model"], "gpt-6-sol" if name == "review" else m.MODEL)
+            self.assertEqual(role["model_reasoning_effort"], "high" if name == "review" else "xhigh")
+            self.assertFalse(role["features"]["multi_agent"])
+            self.assertFalse(role["agents"]["enabled"])
+            refs = ROOT / "skills/sunday-note-monitor/references"
+            self.assertEqual(role["developer_instructions"],
+                             (refs / "checks.md").read_text() + "\n" + (refs / (name + ".md")).read_text())
+
+    def test_delegations_share_initial_context_snapshot(self):
+        shared = {"project": "shared-context-snapshot"}
+        recent = [{"summary": "recent-feedback-snapshot"}]
+        def run(argv, **kwargs):
+            if argv[1:3] == ["login", "status"]:
+                return 0, "Logged in using ChatGPT"
+            scratch = Path(kwargs["cwd"])
+            for name in ("consistency", "redundancy", "knowledge", "review"):
+                brief = m.read_json(scratch / (name + "-brief.json"))
+                self.assertEqual(brief["project_context"], shared)
+                self.assertEqual(brief["recent_feedback"], recent)
+            self.assertIn(json.dumps(shared, ensure_ascii=False), kwargs["text"])
+            self.assertIn(json.dumps(recent, ensure_ascii=False), kwargs["text"])
+            m.atomic(scratch / "result.json", {"context_updates": [], "checked": [], "feedback": None,
+                     "summaries": [{"turn_id": "t", "summary": empty()["summary"]}]})
+            return 0, ""
+        event = {**self.event, "codex": sys.executable, "_turns": [self.event]}
+        with patch.object(m, "sandbox_probe"), patch.object(m, "run_process", side_effect=run), \
+                patch.object(m, "project_context", return_value=shared) as context_reader, \
+                patch.object(m, "recent_findings", return_value=recent) as feedback_reader:
+            result, _ = m.evaluate(self.config, event)
+        self.assertFalse(result["partial"])
+        context_reader.assert_called_once()
+        feedback_reader.assert_called_once()
+
+    def test_checkpoint_and_drifting_review(self):
+        import facts
+        (self.base / "checks").mkdir()
+        source = self.project / "a.py"
+        source.write_text("before")
+        check = {"direction": "review", "target_id": "target", "status": "complete",
+                 "findings": [], "checked": [], "read_versions": [{"path": str(source), "sha256": facts.sha(source.read_bytes())}], "limitations": []}
+        m.atomic(self.base / "checks/review.json", check)
+        m.atomic(self.base / "checkpoint.json", {"summaries": [{"turn_id": "t", "summary": empty()["summary"]}]})
+        event = {**self.event, "_turns": [self.event]}
+        source.write_text("after")
+        checks, summaries, issues = m.execution_artifacts(self.base, event, {"target_id": "target", "complete": True})
+        self.assertEqual(checks[0]["status"], "partial")
+        self.assertEqual(summaries[0]["turn_id"], "t")
+        self.assertEqual(issues, [])
+        m.atomic(self.base / "checkpoint.json", {"summaries": [{"turn_id": "wrong", "summary": empty()["summary"]}]})
+        self.assertIn("invalid_checkpoint", m.execution_artifacts(self.base, event, {"target_id": "target"})[2])
+
+    def test_git_snapshot_staged_untracked_commit_and_drift(self):
+        import facts
+        def git(*args):
+            subprocess.run(["git", "-C", str(self.project), *args], check=True, capture_output=True)
+        git("init")
+        source = self.project / "a.py"
+        source.write_text("old\n")
+        git("add", ".")
+        git("-c", "user.name=Test", "-c", "user.email=t@example.invalid", "commit", "-m", "initial")
+        base = facts.head(self.project)
+        source.write_text("staged\n")
+        git("add", ".")
+        source.write_text("unstaged\n")
+        (self.project / "new.py").write_text("new\n")
+        target = facts.collect_target(self.project, self.base)
+        self.assertTrue(target["complete"])
+        self.assertEqual(len(target["files"]), 2)
+        self.assertTrue(facts.target_current(target))
+        self.assertTrue(Path(target["staged_patch"]).read_text())
+        self.assertTrue(Path(target["unstaged_patch"]).read_text())
+        self.assertTrue(target["files"][0].get("index_snapshot"))
+        source.write_text("drift\n")
+        self.assertFalse(facts.target_current(target))
+        git("add", ".")
+        git("-c", "user.name=Test", "-c", "user.email=t@example.invalid", "commit", "-m", "next")
+        next_scratch = self.base / "next"
+        next_scratch.mkdir()
+        committed = facts.collect_target(self.project, next_scratch, base)
+        self.assertEqual(committed["base"], base)
+        self.assertEqual(len(committed["files"]), 2)
+        fresh_scratch = self.base / "fresh"
+        fresh_scratch.mkdir()
+        fresh = facts.collect_target(self.project, fresh_scratch)
+        self.assertEqual(fresh["base"], base)
+        self.assertEqual(fresh["scope"], "latest_commit_candidate_not_turn_attribution")
+
+    def test_usage_does_not_claim_parent_is_total(self):
+        trace = self.base / "events.jsonl"
+        trace.write_text(json.dumps({"type": "item.completed", "item": {"type": "collab_tool_call", "tool": "wait", "receiver_thread_ids": ["child"]}}) + "\n" +
+                         json.dumps({"type": "turn.completed", "usage": {"input_tokens": 10}}))
+        usage = m.execution_usage(trace)
+        self.assertIsNone(usage["total"])
+        self.assertFalse(usage["complete"])
+        self.assertIsNone(usage["children"]["child"]["usage"])
+        trace.write_text(json.dumps({"type": "turn.completed", "usage": {"input_tokens": 10}}))
+        self.assertIsNone(m.execution_usage(trace, parallel=True)["total"])
+
+    def test_process_trace_timing_and_unicode_tail(self):
+        trace = self.base / "trace.jsonl"
+        rc, text = m.run_process([sys.executable, "-c", "print('中' * 30000)"], event_log=trace, timeout=5)
+        self.assertEqual(rc, 0)
+        self.assertTrue(text.endswith("中\n"))
+        self.assertTrue(Path(str(trace) + ".times").read_text())
+        with self.assertRaisesRegex(RuntimeError, "timeout"):
+            m.run_process([sys.executable, "-c", "import time; time.sleep(30)"], timeout=0.05)
+
+    def test_partial_summary_is_archived_without_push(self):
+        self.collect("UserPromptSubmit", prompt="change")
+        self.collect("Stop", last_assistant_message="changed")
+        value = empty()
+        value.update(partial=True, limitations=["timeout"], checks=[],
+                     target={"head": "new", "base": "old", "target_id": "target"},
+                     feedback=report([{"title": "possible", "reason": "needs review", "check": "review", "evidence": [{"location": "s/t", "quote": "changed"}]}]))
+        value["context_updates"] = [{"key": "unverified", "value": "new", "source": {"location": "s/t", "quote": "changed"}}]
+        self.work(lambda c, e: (value, 600))
+        state = m.read_json(self.runtime / "state.json")
+        self.assertNotIn("analysis_revision", state)
+        self.assertEqual(state["review_base"], "old")
+        self.assertNotIn("unverified", m.project_context(self.root, self.event)["facts"])
+        self.assertEqual(state["partial_feedback"]["findings"][0]["title"], "possible")
+        self.assertFalse(list((self.root / "findings").glob("*.json")))
+        self.assertTrue(any(r.get("partial") for r in self.rows()))
+
+    def test_missing_partial_summary_waits_for_next_wake(self):
+        self.collect("UserPromptSubmit", prompt="change")
+        self.collect("Stop", last_assistant_message="changed")
+        calls = []
+        def timeout(config, event):
+            calls.append(event)
+            return {"summaries": [], "checked": [], "feedback": None, "partial": True,
+                    "limitations": ["timeout"]}, 600
+        m.worker(self.cp, self.runtime, timeout, wait_seconds=0)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(len(list((self.runtime / "queue").glob("*.json"))), 1)
+        self.assertFalse(any(r["kind"] == "summary" for r in self.rows()))
+        self.assertEqual(m.read_json(self.runtime / "state.json")["blocked"], "summary_incomplete")
+        self.collect("UserPromptSubmit", turn_id="next", prompt="continue")
+        self.collect("Stop", turn_id="next", last_assistant_message="done")
+        self.work(lambda c, e: (empty(), 1))
+        self.assertFalse(list((self.runtime / "queue").glob("*.json")))
+        self.assertEqual(sum(r["kind"] == "summary" for r in self.rows()), 2)
+
+    def test_complete_summary_partial_analysis_can_retry_without_duplicate_summary(self):
+        self.collect("UserPromptSubmit", prompt="change")
+        self.collect("Stop", last_assistant_message="changed")
+        calls = []
+        def partial(c, e):
+            calls.append(e)
+            return {**empty(), "partial": True, "limitations": ["timeout"]}, 600
+        self.work(partial)
+        self.work(partial)
+        self.assertEqual(len(calls), 1)  # No automatic busy retry on the same wake.
+        self.assertEqual(len(list((self.runtime / "queue").glob("*.json"))), 1)
+        self.assertFalse(any(r["kind"] == "summary" for r in self.rows()))
+        self.assertEqual(sum(r["kind"] == "summary_checkpoint" for r in self.rows()), 1)
+        with patch.object(m, "spawn_worker"):
+            m.wake_sessions(self.cp, self.root)
+        self.work(lambda c, e: (empty(), 1))
+        self.assertFalse(list((self.runtime / "queue").glob("*.json")))
+        self.assertEqual(sum(r["kind"] == "summary" for r in self.rows()), 1)
+        self.assertIn("analysis_revision", m.read_json(self.runtime / "state.json"))
+
+    def test_check_versions_reject_outside_scope_before_reading(self):
+        (self.base / "checks").mkdir()
+        check = {"direction": "consistency", "target_id": "", "status": "complete", "findings": [],
+                 "checked": [], "read_versions": [{"path": "/outside/private", "sha256": "abc"}], "limitations": []}
+        m.atomic(self.base / "checks/consistency.json", check)
+        with patch.object(m, "version_current") as read:
+            checks, _, issues = m.execution_artifacts(self.base, {**self.event, "_turns": [self.event]}, {}, self.config)
+            read.assert_not_called()
+        self.assertEqual(checks, [])
+        self.assertEqual(issues, ["invalid_check:consistency:check version outside reference scope"])
 
 
 if __name__ == "__main__":

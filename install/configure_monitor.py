@@ -164,6 +164,7 @@ def configure(vault, codex_home, applications, uninstall=False, proxy_url=None):
     desktop.unlink(missing_ok=True)
     skill.mkdir(parents=True, exist_ok=True)
     shutil.copy2(SOURCE / "skills" / "sunday-note-monitor" / "SKILL.md", skill / "SKILL.md")
+    shutil.copytree(SOURCE / "skills" / "sunday-note-monitor" / "references", skill / "references", dirs_exist_ok=True)
     local_config = read_json(config_path, {})
     local_config.setdefault("project_roots", [str(vault.resolve())])
     if proxy_url is not None:
@@ -175,7 +176,8 @@ def configure(vault, codex_home, applications, uninstall=False, proxy_url=None):
     argv = [sys.executable, str(runtime / "monitor.py"), "--config", str(config_path)]
     for event in ("UserPromptSubmit", "Stop"):
         hooks["hooks"][event].append({"hooks": [
-            {"type": "command", "command": shlex.join([*argv, "hook"]), "timeout": 5}]})
+            {"type": "command", "command": shlex.join([*argv, "hook"]), "timeout": 5,
+             "additionalContextLimit": 0}]})
     atomic(hook_file, hooks)
     write_text(config_file, updated)
     atomic(install_state, {"feature_change": old.get("feature_change") or change})
