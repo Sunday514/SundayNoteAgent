@@ -175,9 +175,10 @@ def configure(vault, codex_home, applications, uninstall=False, proxy_url=None):
                         "query": str(SOURCE / "skills" / "sunday-note-query" / "scripts" / "query_search.py")})
     argv = [sys.executable, str(runtime / "monitor.py"), "--config", str(config_path)]
     for event in ("UserPromptSubmit", "Stop"):
-        hooks["hooks"][event].append({"hooks": [
-            {"type": "command", "command": shlex.join([*argv, "hook"]), "timeout": 5,
-             "additionalContextLimit": 0}]})
+        handler = {"type": "command", "command": shlex.join([*argv, "hook"]), "timeout": 5}
+        if event == "UserPromptSubmit":
+            handler["additionalContextLimit"] = 0
+        hooks["hooks"][event].append({"hooks": [handler]})
     atomic(hook_file, hooks)
     write_text(config_file, updated)
     atomic(install_state, {"feature_change": old.get("feature_change") or change})
