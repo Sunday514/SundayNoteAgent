@@ -27,23 +27,39 @@ def head(cwd):
         return ""
 
 
+def baseline(cwd):
+    try:
+        repo = git(cwd, "rev-parse", "--show-toplevel").decode().strip()
+        return {"repository": repo, "head": head(repo)}
+    except (OSError, subprocess.SubprocessError):
+        return {}
+
+
+def review_base(cwd, state, turns):
+    repo = baseline(cwd).get("repository")
+    if repo and state.get("target_repository") == repo:
+        if state.get("baseline_known") is not True:
+            return ""
+        previous = state.get("review_base") or state.get("last_head")
+        if previous:
+            return previous
+    first = turns[0].get("git_baseline", {}) if turns else {}
+    return first.get("head", "") if repo and first.get("repository") == repo else ""
+
+
 def collect_target(cwd, scratch, previous_head=""):
     """Freeze a cumulative target. Workspace changes are never claimed as turn edits."""
     try:
         repo = Path(git(cwd, "rev-parse", "--show-toplevel").decode().strip())
         current = head(repo)
         base = current
+        baseline_known = False
         scope = "workspace_background_not_turn_attribution"
-        if not previous_head and current and not git(repo, "status", "--porcelain", "-z"):
-            try:
-                base = git(repo, "rev-parse", "HEAD^").decode().strip()
-                scope = "latest_commit_candidate_not_turn_attribution"
-            except subprocess.SubprocessError:
-                pass  # Initial commit: no supported parent range.
-        if previous_head and previous_head != current:
+        if previous_head and current:
             try:
                 git(repo, "merge-base", "--is-ancestor", previous_head, current)
                 base = previous_head
+                baseline_known = True
             except subprocess.SubprocessError:
                 pass
         if not base:
@@ -101,7 +117,9 @@ def collect_target(cwd, scratch, previous_head=""):
                 "target_id": identity, "scope": scope,
                 "patch_sha256": sha(patch), "untracked": sorted(os.fsdecode(n) for n in untracked if n),
                 "staged_patch_sha256": sha(staged), "unstaged_patch_sha256": sha(unstaged),
-                "complete": complete and stable, "files": files,
+                "complete": complete and stable and baseline_known,
+                "baseline_known": baseline_known,
+                "uncovered": [] if baseline_known else ["committed_range_unknown"], "files": files,
                 "patch": str(directory / "change.patch") if (directory / "change.patch").exists() else None,
                 "staged_patch": str(directory / "staged.patch") if (directory / "staged.patch").exists() else None,
                 "unstaged_patch": str(directory / "unstaged.patch") if (directory / "unstaged.patch").exists() else None,

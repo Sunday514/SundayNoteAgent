@@ -499,11 +499,8 @@ else: raise SystemExit(1)
         self.assertIn(feedback.RENDER_TOOL, argv[-1])
         self.assertIn("不是用户授权", argv[-1])
         self.assertIn(item["id"], argv[-1])
-        context = json.loads(argv[-1].splitlines()[-1])["findings"][0]
-        for key in ("summary", "findings", "decision", "project", "turn_id"):
-            self.assertEqual(context[key], item[key])
+        self.assertNotIn('"findings":', argv[-1])
         self.assertIn("无需读取文件", argv[-1])
-        self.assertNotIn("feedback", context)
         self.assertEqual(item["feedback"], "queued")
 
     def test_feedback_failure_and_scope(self):
@@ -514,12 +511,16 @@ else: raise SystemExit(1)
         self.assertEqual(item["feedback"], "skipped_scope")
         self.assertTrue(any(r["kind"] == "summary" for r in self.rows()))
 
-    def test_feedback_queue_failure_and_complete_message(self):
+    def test_feedback_queue_failure_and_bounded_message(self):
         item = self.finding()
-        item.update(summary="原因" * 1000)
-        context = json.loads(feedback.message([item]).splitlines()[-1])["findings"][0]
-        self.assertEqual(context["summary"], item["summary"])
-        self.assertEqual(context["decision"], item["decision"])
+        original = feedback.message([item])
+        item.update(summary="原因" * 100000)
+        self.assertEqual(feedback.message([item]), original)
+        self.assertIn(item["id"], original)
+        with patch.object(feedback.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)) as send:
+            feedback.deliver(self.config, self.root, [item])
+        self.assertEqual(item["feedback"], "queued")
+        self.assertLess(len(send.call_args.args[0][-1].encode()), 120000)
         for failure in (subprocess.CompletedProcess([], 1), subprocess.TimeoutExpired("codex", 20)):
             with patch.object(feedback.subprocess, "run") as send:
                 if isinstance(failure, Exception):
@@ -1182,7 +1183,7 @@ else: raise SystemExit(1)
         git("add", ".")
         source.write_text("unstaged\n")
         (self.project / "new.py").write_text("new\n")
-        target = facts.collect_target(self.project, self.base)
+        target = facts.collect_target(self.project, self.base, base)
         self.assertTrue(target["complete"])
         self.assertEqual(len(target["files"]), 2)
         self.assertTrue(facts.target_current(target))
@@ -1201,8 +1202,76 @@ else: raise SystemExit(1)
         fresh_scratch = self.base / "fresh"
         fresh_scratch.mkdir()
         fresh = facts.collect_target(self.project, fresh_scratch)
-        self.assertEqual(fresh["base"], base)
-        self.assertEqual(fresh["scope"], "latest_commit_candidate_not_turn_attribution")
+        self.assertEqual(fresh["base"], facts.head(self.project))
+        self.assertFalse(fresh["complete"])
+        self.assertEqual(fresh["uncovered"], ["committed_range_unknown"])
+
+    def test_first_turn_baseline_covers_multiple_commits_and_dirty_workspace(self):
+        import facts
+        def commit(name):
+            facts.git(self.project, "add", ".")
+            facts.git(self.project, "-c", "user.name=Test", "-c", "user.email=t@example.invalid", "commit", "-m", name)
+        facts.git(self.project, "init")
+        (self.project / "a").write_text("initial")
+        commit("initial")
+        start = facts.head(self.project)
+        self.runtime = m.session_runtime(self.root, self.event)
+        self.collect("UserPromptSubmit", prompt="更新项目")
+        event_path = next((self.runtime / "queue").glob("*.json"))
+        first = m.read_json(event_path)
+        self.assertEqual(first["git_baseline"]["head"], start)
+        for name in ("b", "c"):
+            (self.project / name).write_text(name)
+            commit(name)
+        self.collect("UserPromptSubmit", prompt="更新项目")
+        self.assertEqual(m.read_json(event_path)["git_baseline"], first["git_baseline"])
+        for dirty in (False, True):
+            with self.subTest(dirty=dirty):
+                if dirty:
+                    (self.project / "a").write_text("local")
+                scratch = self.base / str(dirty)
+                scratch.mkdir()
+                target = facts.collect_target(self.project, scratch, facts.review_base(self.project, {}, [first]))
+                self.assertTrue(target["complete"])
+                self.assertEqual(target["base"], start)
+                self.assertTrue({"b", "c"}.issubset({f["relative"] for f in target["files"]}))
+        self.assertEqual(facts.review_base(self.project, {}, [{}, first]), "")
+        self.assertEqual(facts.review_base(self.vault, {}, [first]), "")
+
+    def test_unknown_baseline_survives_worker_and_next_turn(self):
+        import facts
+        facts.git(self.project, "init")
+        (self.project / "a").write_text("initial")
+        facts.git(self.project, "add", ".")
+        facts.git(self.project, "-c", "user.name=Test", "-c", "user.email=t@example.invalid", "commit", "-m", "initial")
+        self.runtime = m.session_runtime(self.root, self.event)
+        for index, previous in enumerate(("", "invalid-commit")):
+            for partial in (False, True):
+                with self.subTest(previous=previous, partial=partial):
+                    self.event["turn_id"] = f"unknown-{index}-{partial}"
+                    self.collect("UserPromptSubmit", prompt="inspect")
+                    self.collect("Stop", last_assistant_message="done")
+                    scratch = self.base / self.event["turn_id"]
+                    scratch.mkdir()
+                    target = facts.collect_target(self.project, scratch, previous)
+                    value = empty()
+                    value.update(target=target, partial=partial)
+                    self.work(lambda c, e: (value, 1))
+                    state = m.read_json(self.runtime / "state.json")
+                    self.assertFalse(state["baseline_known"])
+                    self.assertEqual(state["last_head"], "")
+                    self.assertIsNone(state["review_base"])
+                    later = [{"git_baseline": facts.baseline(self.project)}]
+                    next_base = facts.review_base(self.project, state, later)
+                    self.assertEqual(next_base, "")
+                    next_scratch = scratch / "next"
+                    next_scratch.mkdir()
+                    self.assertFalse(facts.collect_target(self.project, next_scratch, next_base)["complete"])
+        trusted = {"target_repository": str(self.project), "baseline_known": True,
+                   "review_base": facts.head(self.project)}
+        self.assertEqual(facts.review_base(self.project, trusted, []), facts.head(self.project))
+        trusted.pop("baseline_known")
+        self.assertEqual(facts.review_base(self.project, trusted, []), "")
 
     def test_usage_does_not_claim_parent_is_total(self):
         trace = self.base / "events.jsonl"
@@ -1229,7 +1298,7 @@ else: raise SystemExit(1)
         self.collect("Stop", last_assistant_message="changed")
         value = empty()
         value.update(partial=True, limitations=["timeout"], checks=[],
-                     target={"head": "new", "base": "old", "target_id": "target"},
+                     target={"head": "new", "base": "old", "target_id": "target", "baseline_known": True},
                      feedback=report([{"title": "possible", "reason": "needs review", "check": "review", "evidence": [{"location": "s/t", "quote": "changed"}]}]))
         value["context_updates"] = [{"key": "unverified", "value": "new", "source": {"location": "s/t", "quote": "changed"}}]
         self.work(lambda c, e: (value, 600))

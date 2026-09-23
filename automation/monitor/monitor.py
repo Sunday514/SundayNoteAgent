@@ -28,7 +28,7 @@ from feedback import MARKER, deliver
 from app_status import read_thread
 from contracts import (SUMMARY_SCHEMA, RESULT_SCHEMA, CHECKPOINT_SCHEMA,
                        CHECK_SCHEMA, validate, validate_feedback, resolve_handoff)
-from facts import collect_target, target_current, turn_tools, version_current, related_repositories
+from facts import baseline, review_base, collect_target, target_current, turn_tools, version_current, related_repositories
 
 
 def digest(value):
@@ -236,6 +236,8 @@ def collect(config, payload):
         path = runtime / "queue" / (key + ".json")
         event = read_json(path, {})
         before = dict(event)
+        if event_name == "UserPromptSubmit" and not event:
+            event["git_baseline"] = baseline(payload["cwd"])
         if payload["turn_id"] in completed_turns(session_path(root, payload)):
             atomic(runtime / "state.json", state)
             return False
@@ -625,7 +627,7 @@ def evaluate(config, event):
         context["tool_repositories"] = repositories
         repositories = [r for r in repositories if reference_allowed(r, event, config)]
         target_cwd = repositories[0] if len(repositories) == 1 else event["cwd"]
-        previous_head = (runtime_state.get("review_base") or runtime_state.get("last_head", "")) if runtime_state.get("target_repository", target_cwd) == target_cwd else ""
+        previous_head = review_base(target_cwd, runtime_state, event["_turns"])
         target = collect_target(target_cwd, scratch, previous_head)
         context["change_target"] = target
         context["prior_checks"] = [c for c in runtime_state.get("checks", [])
@@ -937,9 +939,11 @@ def worker(config_path, runtime, evaluator=evaluate, status_reader=read_thread,
                         merged = {c["direction"]: c for c in previous if c["status"] == "complete"}
                         merged.update({c["direction"]: c for c in value.get("checks", [])})
                         review = merged.get("review", {})
-                        state.update(last_head=target.get("head", state.get("last_head", "")),
-                                     target_repository=target.get("repository"),
-                                     review_base=target.get("base") if value.get("partial") or (review and review.get("status") != "complete") else None,
+                        known = target.get("baseline_known") is True
+                        state.update(last_head=target.get("head", "") if known else "",
+                                     baseline_known=known,
+                                     target_repository=target.get("repository") or state.get("target_repository"),
+                                     review_base=target.get("base") if known and (value.get("partial") or (review and review.get("status") != "complete")) else None,
                                      target_id=target.get("target_id"), checks=list(merged.values()),
                                      partial_checks=value.get("checks", []) if value.get("partial") else [],
                                      partial_feedback=value.get("feedback") if value.get("partial") else None)
