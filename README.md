@@ -122,7 +122,7 @@ validation/               # 仅供开发使用的隔离诊断 CLI
 
 ## Monitor（可选）
 
-Monitor 在配置项目范围内的 Codex 主会话每轮回复后，用订阅内的 `gpt-6-luna` 做只读关联检查和记录。有价值的新建议通过 `codex queue` 回传来源会话，要求只调用渲染工具，以紧凑 widget 展示摘要、可选方案和确认／忽略按钮，不限制来源会话模型。
+Monitor 在配置项目范围内的 Codex 主会话每轮回复后，用订阅内的 `gpt-6-luna` 做只读关联检查和记录。不同会话并行、同一会话串行；连续对话的待发建议随新内容滚动复核，仅在来源 App 明确空闲且轮次未变时回传。紧凑 widget 展示摘要、可选方案和确认／忽略按钮；无法可靠查询状态时只记录、暂不自动推送。
 
 ```bash
 bash SundayNoteAgent/install/install.sh --vault-root . --with-monitor --monitor-only

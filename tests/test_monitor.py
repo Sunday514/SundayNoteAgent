@@ -8,6 +8,9 @@ import subprocess
 import sys
 import tempfile
 import time
+import threading
+import socket
+import struct
 import unittest
 from unittest.mock import patch
 
@@ -23,7 +26,7 @@ spec.loader.exec_module(installer)
 
 
 def empty():
-    return {"context_updates": [], "summary": {k: [] for k in m.RESULT_SCHEMA["properties"]["summary"]["properties"]},
+    return {"context_updates": [], "summary": {k: [] for k in m.SUMMARY_SCHEMA["properties"]},
             "checked": [], "findings": []}
 
 
@@ -43,6 +46,15 @@ class MonitorTests(unittest.TestCase):
         self.root = m.root_for(self.config)
         self.event = {"session_id": "s", "turn_id": "t", "cwd": str(self.project), "codex": "codex",
                       "transcript_path": str(self.base / "transcript.jsonl")}
+        self.runtime = m.session_runtime(self.root, self.event)
+
+    def work(self, evaluator):
+        def batch(c, e):
+            value, elapsed = evaluator(c, e)
+            value["summaries"] = [{"turn_id": t["turn_id"], "summary": value["summary"]} for t in e["_turns"]]
+            del value["summary"]
+            return value, elapsed
+        return m.worker(self.cp, self.runtime, batch, wait_seconds=0)
 
     def collect(self, kind, **kw):
         return m.collect(self.config, {**self.event, "hook_event_name": kind, **kw})
@@ -68,7 +80,7 @@ class MonitorTests(unittest.TestCase):
     def test_source_codex_persisted_and_used(self):
         self.config["codex"] = "/source/app/codex"
         self.collect("Stop", last_assistant_message="ok")
-        event = m.read_json(next((self.root / "queue").glob("*.json")))
+        event = m.read_json(next((self.runtime / "queue").glob("*.json")))
         self.assertEqual(event["codex"], "/source/app/codex")
         self.event["codex"] = event["codex"]
         item = self.finding()
@@ -89,7 +101,7 @@ class MonitorTests(unittest.TestCase):
             for kind in ("UserPromptSubmit", "Stop"):
                 self.assertFalse(self.collect(kind, cwd=str(cwd)))
         self.assertEqual(self.rows(), [])
-        self.assertFalse(list((self.root / "queue").glob("*.json")))
+        self.assertFalse(list((self.runtime / "queue").glob("*.json")))
         self.assertFalse((self.root / "state.json").exists())
         self.assertTrue(m.project_allowed({"vault": str(self.vault)}, str(self.vault)))
         self.assertFalse(m.project_allowed({"vault": str(self.vault)}, str(self.project)))
@@ -118,8 +130,9 @@ class MonitorTests(unittest.TestCase):
         with patch.dict(os.environ, {"GIT_DIR": str(self.project / ".git")}):
             self.assertFalse(m.project_allowed(self.config, str(clone)))
         self.assertTrue(self.collect("Stop", cwd=str(linked), last_assistant_message="changed code"))
+        self.runtime = m.session_runtime(self.root, {**self.event, "cwd": str(linked)})
         calls = []
-        m.worker(self.cp, lambda c, e: (calls.append(e) or empty(), 0))
+        self.work(lambda c, e: (calls.append(e) or empty(), 0))
         self.assertEqual(calls[0]["cwd"], str(linked))
 
     def test_git_scope_probe_failure(self):
@@ -145,8 +158,8 @@ class MonitorTests(unittest.TestCase):
     def test_removed_project_is_not_evaluated(self):
         self.collect("Stop", last_assistant_message="answer")
         m.atomic(self.cp, {**self.config, "project_roots": []})
-        m.worker(self.cp, lambda c, e: self.fail("excluded project evaluated"))
-        self.assertFalse(list((self.root / "queue").glob("*.json")))
+        self.work(lambda c, e: self.fail("excluded project evaluated"))
+        self.assertFalse(list((self.runtime / "queue").glob("*.json")))
         self.assertFalse(any(r["kind"] == "summary" for r in self.rows()))
 
     def test_dedup_pair_and_raw_cleanup(self):
@@ -157,11 +170,11 @@ class MonitorTests(unittest.TestCase):
         def evaluate(c, e):
             calls.append(e)
             return empty(), 1
-        m.worker(self.cp, evaluate)
+        self.work(evaluate)
         self.assertEqual(len(calls), 1)
         self.assertEqual(calls[0]["prompt"], "question")
-        self.assertEqual([r["kind"] for r in self.rows()], ["registered", "summary"])
-        self.assertFalse(list((self.root / "queue").glob("*.json")))
+        self.assertEqual([r["kind"] for r in self.rows()], ["registered", "summary", "analysis"])
+        self.assertFalse(list((self.runtime / "queue").glob("*.json")))
         self.assertFalse(self.collect("Stop", last_assistant_message="answer"))
         self.assertNotIn('"answer"', json.dumps(self.rows()))
 
@@ -173,14 +186,14 @@ class MonitorTests(unittest.TestCase):
             del payload["transcript_path"]
             self.assertFalse(m.collect(self.config, payload))
         self.assertEqual(self.rows(), [])
-        self.assertFalse(list((self.root / "queue").glob("*.json")))
+        self.assertFalse(list((self.runtime / "queue").glob("*.json")))
         self.assertFalse((self.root / "state.json").exists())
         self.assertTrue(self.collect("Stop", last_assistant_message="answer"))
 
     def test_missing_context_no_other_session_fallback(self):
         self.collect("UserPromptSubmit", prompt="other", session_id="other")
         self.collect("Stop", last_assistant_message="answer")
-        m.worker(self.cp, lambda c,e: (empty(), 0))
+        self.work(lambda c,e: (empty(), 0))
         summary = next(r for r in self.rows() if r["kind"] == "summary")
         self.assertFalse(summary["context_complete"])
 
@@ -218,13 +231,13 @@ class MonitorTests(unittest.TestCase):
         def fail(c,e):
             calls.append(e)
             raise RuntimeError("quota_exhausted")
-        m.worker(self.cp, fail)
-        m.worker(self.cp, fail)
+        self.work(fail)
+        self.work(fail)
         self.assertEqual(len(calls), 1)
-        self.assertEqual(len(list((self.root / "queue").glob("*.json"))), 1)
+        self.assertEqual(len(list((self.runtime / "queue").glob("*.json"))), 1)
         self.collect("Stop", turn_id="next", last_assistant_message="y")
-        m.worker(self.cp, lambda c,e: (empty(), 0))
-        self.assertFalse(list((self.root / "queue").glob("*.json")))
+        self.work(lambda c,e: (empty(), 0))
+        self.assertFalse(list((self.runtime / "queue").glob("*.json")))
 
     def test_new_event_during_evaluation_not_lost(self):
         self.collect("Stop", last_assistant_message="x")
@@ -234,9 +247,9 @@ class MonitorTests(unittest.TestCase):
                 self.collect("UserPromptSubmit", prompt="late prompt")
             calls.append(e)
             return empty(), 0
-        m.worker(self.cp, evaluate)
+        self.work(evaluate)
         self.assertEqual(len(calls), 2)
-        self.assertFalse(list((self.root / "queue").glob("*.json")))
+        self.assertFalse(list((self.runtime / "queue").glob("*.json")))
 
     def test_identical_stop_during_evaluation_is_noop(self):
         self.collect("Stop", last_assistant_message="answer")
@@ -245,7 +258,7 @@ class MonitorTests(unittest.TestCase):
             calls.append(e)
             self.assertFalse(self.collect("Stop", last_assistant_message="answer"))
             return empty(), 0
-        m.worker(self.cp, evaluate)
+        self.work(evaluate)
         self.assertEqual(len(calls), 1)
 
     def test_local_failure_does_not_block_other_turns(self):
@@ -260,9 +273,9 @@ class MonitorTests(unittest.TestCase):
                     if e["turn_id"] == bad:
                         raise error
                     return empty(), 0
-                m.worker(self.cp, evaluate)
-                self.assertEqual(calls, [bad, good])
-                self.assertFalse(list((self.root / "queue").glob("*.json")))
+                self.work(evaluate)
+                self.assertEqual(calls, [good])
+                self.assertFalse(list((self.runtime / "queue").glob("*.json")))
                 self.assertFalse(self.collect("Stop", turn_id=bad))
         self.assertNotIn("private raw", json.dumps(self.rows()))
 
@@ -273,9 +286,9 @@ class MonitorTests(unittest.TestCase):
         self.assertFalse(self.collect("Stop", last_assistant_message="late"))
         with patch.object(m.time, "time", return_value=time.time() + 86401):
             self.collect("UserPromptSubmit", session_id="other", turn_id="other")
-        queued = [m.read_json(p) for p in (self.root / "queue").glob("*.json")]
-        self.assertEqual(len(queued), 1)
-        self.assertEqual(queued[0]["session_id"], "other")
+        queued = [m.read_json(p) for p in (self.runtime / "queue").glob("*.json")]
+        self.assertEqual(len(queued), 1)  # Another session cannot mutate this session's queue.
+        self.assertEqual(queued[0]["session_id"], "s")
         self.assertNotIn("private raw", json.dumps(self.rows()))
 
     def test_transcript_session_and_turn(self):
@@ -295,7 +308,9 @@ class MonitorTests(unittest.TestCase):
         self.assertEqual(m.transcript_exchange(event), event)
 
     def test_output_validation_and_evidence(self):
-        m.validate(empty(), m.RESULT_SCHEMA)
+        value = empty()
+        value["summaries"] = [{"turn_id": "t", "summary": value.pop("summary")}]
+        m.validate(value, m.RESULT_SCHEMA)
         with self.assertRaises(ValueError):
             m.validate({"findings": []}, m.RESULT_SCHEMA)
         file = self.project / "README.md"
@@ -304,10 +319,11 @@ class MonitorTests(unittest.TestCase):
                 "options":["update document","check code"], "evidence":[{"location":str(file),"quote":"old entry"}]}
         result = empty()
         result["findings"] = [item]
-        m.validate(result, m.RESULT_SCHEMA)
+        m.validate({**{k:v for k,v in result.items() if k != "summary"},
+                    "summaries": [{"turn_id":"t", "summary":result["summary"]}]}, m.RESULT_SCHEMA)
         new = m.finalize(self.root, self.config, self.event, result, 1)
         self.assertEqual(len(new), 1)
-        self.assertEqual(m.finalize(self.root,self.config,self.event,result,1), [])
+        self.assertEqual(m.finalize(self.root,self.config,self.event,result,1), new)
         item["evidence"][0]["quote"] = "nonexistent"
         self.assertEqual(m.finalize(self.root,self.config,self.event,result,1), [])
 
@@ -328,7 +344,7 @@ class MonitorTests(unittest.TestCase):
                 ids = m.finalize(self.root, self.config, self.event, result, 0)
                 self.assertEqual(len(ids), 1)
                 self.assertNotEqual(ids, first)
-                self.assertEqual(m.finalize(self.root, self.config, self.event, result, 0), [])
+                self.assertEqual(m.finalize(self.root, self.config, self.event, result, 0), ids)
 
     def test_evidence_line_ranges(self):
         file = self.project / "module.py"
@@ -419,7 +435,8 @@ elif a[0]=='exec':
  assert a[a.index('-m')+1]=='gpt-6-luna'
  text=sys.stdin.read()
  assert 'context_complete' in text
- Path(a[a.index('-o')+1]).write_text(json.dumps({'context_updates':[],'summary':{k:[] for k in ['user_requests','user_decisions','assistant_claims','observations','inferences','open_questions']},'checked':[],'findings':[]}))
+ Path(a[a.index('-o')+1]).write_text(json.dumps({'context_updates':[],'summaries':[{'turn_id':'t','summary':{k:[] for k in ['user_requests','user_decisions','assistant_claims','observations','inferences','open_questions']}}],'checked':[],'findings':[]}))
+ print(json.dumps({'type':'turn.completed','usage':{'input_tokens':123,'output_tokens':45}}))
 else: raise SystemExit(1)
 ''')
         fake.chmod(0o700)
@@ -431,9 +448,10 @@ else: raise SystemExit(1)
                            capture_output=True,text=True,timeout=3)
         self.assertEqual(json.loads(r.stdout),{"continue":True})
         deadline=time.monotonic()+3
-        while time.monotonic()<deadline and self.rows()[-1]["kind"]!="summary":
+        while time.monotonic()<deadline and self.rows()[-1]["kind"]!="analysis":
             time.sleep(.02)
-        self.assertEqual(self.rows()[-1]["kind"],"summary")
+        self.assertEqual(self.rows()[-1]["kind"],"analysis")
+        self.assertEqual(self.rows()[-1]["usage"]["input_tokens"], 123)
         self.assertFalse(list((self.root/"findings").glob("*.json")))
 
     def finding(self):
@@ -522,7 +540,8 @@ else: raise SystemExit(1)
                         {"session_id": "s", "finding_ids": [item["id"], item["id"]]})
         source.update(title="", instruction="", options=[])
         result["findings"] = [source]
-        m.validate(result, m.RESULT_SCHEMA)
+        m.validate({**{k:v for k,v in result.items() if k != "summary"},
+                    "summaries": [{"turn_id":"t", "summary":result["summary"]}]}, m.RESULT_SCHEMA)
         fid = m.finalize(self.root, self.config, self.event, result, 0)[0]
         with patch.object(widget, "queue") as send:
             widget.call(self.config, widget.ACTION_TOOL,
@@ -621,16 +640,220 @@ else: raise SystemExit(1)
     def test_feedback_turn_does_not_recurse(self):
         self.collect("UserPromptSubmit", prompt=feedback.MARKER + " test")
         self.collect("Stop", last_assistant_message="question")
-        m.worker(self.cp, lambda c, e: self.fail("feedback was evaluated again"))
-        self.assertEqual(self.rows()[-1]["kind"], "summary")
-        self.assertFalse(list((self.root / "queue").glob("*.json")))
+        self.work(lambda c, e: self.fail("feedback was evaluated again"))
+        self.assertEqual(self.rows()[-1]["kind"], "analysis")
+        self.assertFalse(list((self.runtime / "queue").glob("*.json")))
 
     def test_single_worker(self):
         self.collect("Stop",last_assistant_message="x")
-        with m.lock(self.root/"worker.lock"):
+        with m.lock(self.runtime/"worker.lock"):
             with patch.object(m,"evaluate",side_effect=AssertionError("must not execute")):
-                m.worker(self.cp,lambda c,e: self.fail("concurrent worker"))
-        self.assertTrue(list((self.root/"queue").glob("*.json")))
+                self.work(lambda c,e: self.fail("concurrent worker"))
+        self.assertTrue(list((self.runtime/"queue").glob("*.json")))
+
+    def batch_result(self, event, findings=None):
+        return {"context_updates": [], "checked": [], "findings": findings or [],
+                "summaries": [{"turn_id": t["turn_id"], "summary": empty()["summary"]}
+                              for t in event["_turns"]]}
+
+    def test_sessions_run_concurrently(self):
+        self.collect("Stop", last_assistant_message="one")
+        other = {**self.event, "session_id": "second"}
+        m.collect(self.config, {**other, "hook_event_name": "Stop", "last_assistant_message": "two"})
+        runtimes = [self.runtime, m.session_runtime(self.root, other)]
+        barrier = threading.Barrier(2, timeout=3)
+        errors = []
+        calls = []
+        def evaluate(c, event):
+            calls.append(event["session_id"])
+            barrier.wait()
+            return self.batch_result(event), .1
+        def run(runtime):
+            try:
+                m.worker(self.cp, runtime, evaluate, wait_seconds=0)
+            except BaseException as exc:
+                errors.append(exc)
+        threads = [threading.Thread(target=run, args=(r,)) for r in runtimes]
+        for thread in threads: thread.start()
+        for thread in threads: thread.join(5)
+        self.assertFalse(errors)
+        self.assertEqual(set(calls), {"s", "second"})
+        self.assertEqual(sum(r["kind"] == "summary" for r in self.rows()), 2)
+
+    def test_roll_forward_retracts_pending_finding(self):
+        item = self.finding()
+        source = {k: item[k] for k in m.RESULT_SCHEMA["properties"]["findings"]["items"]["properties"]}
+        self.collect("Stop", turn_id="first", last_assistant_message="first")
+        def initial(c, event):
+            self.collect("UserPromptSubmit", turn_id="next", prompt="already fixed")
+            return self.batch_result(event, [source]), 1
+        with patch.object(m, "deliver") as send:
+            m.worker(self.cp, self.runtime, initial, wait_seconds=0)
+            send.assert_not_called()
+        self.collect("Stop", turn_id="next", last_assistant_message="fixed")
+        def updated(c, event):
+            self.assertEqual(len(event["pending_feedback"]), 1)
+            self.assertEqual(event["_turns"][0]["turn_id"], "next")
+            return self.batch_result(event), 1
+        m.worker(self.cp, self.runtime, updated, wait_seconds=0)
+        self.assertEqual(m.read_json(self.runtime / "state.json")["pending_feedback"], [])
+        self.assertEqual(m.read_json(self.root / "findings" / (item["id"] + ".json"))["feedback"], "superseded")
+
+    def test_batch_summaries_must_cover_exact_turns(self):
+        for turn in ("a", "b"):
+            self.collect("Stop", turn_id=turn, last_assistant_message=turn)
+        def invalid(c, event):
+            result = self.batch_result(event)
+            result["summaries"] = result["summaries"][:1] * 2
+            return result, 0
+        m.worker(self.cp, self.runtime, invalid, wait_seconds=0)
+        self.assertEqual(sum(r["kind"] == "failed" for r in self.rows()), 2)
+        self.assertFalse(any(r["kind"] == "summary" for r in self.rows()))
+
+    def gate_fixture(self):
+        item = self.finding()
+        m.atomic(self.runtime / "state.json", {"session_id": "s", "cwd": str(self.project),
+            "revision": 2, "analysis_revision": 2, "latest_turn": "t", "app_pipe": "/fake",
+            "pending_feedback": [item["id"]]})
+        return item
+
+    def test_idle_gate_and_unknown_delivery(self):
+        item = self.gate_fixture()
+        idle = lambda *_: {"status": "idle", "turn_id": "t", "turn_status": "completed"}
+        with patch.object(feedback, "queue") as send:
+            self.assertTrue(m.try_deliver(self.config, self.root, self.runtime, 2, idle, lambda _: None))
+            send.assert_called_once()
+        self.assertEqual(m.read_json(self.runtime / "state.json")["pending_feedback"], [])
+        # A process interrupted after sending must not retry an ambiguous delivery.
+        m.atomic(self.runtime / "state.json", {"session_id": "s", "revision": 2, "analysis_revision": 2,
+            "latest_turn": "t", "app_pipe": "/fake", "pending_feedback": [item["id"]]})
+        with patch.object(feedback, "queue") as send:
+            self.assertFalse(m.try_deliver(self.config, self.root, self.runtime, 2, idle, lambda _: None))
+            send.assert_not_called()
+
+    def test_gate_rejects_active_unknown_and_new_revision(self):
+        self.gate_fixture()
+        for status in ("active", "notLoaded", "systemError"):
+            with patch.object(feedback, "queue") as send:
+                self.assertFalse(m.try_deliver(self.config, self.root, self.runtime, 2,
+                    lambda *_: {"status": status, "turn_id": "t", "turn_status": "completed"}, lambda _: None))
+                send.assert_not_called()
+        def new_turn(_):
+            self.collect("UserPromptSubmit", turn_id="next", prompt="new request")
+        with patch.object(feedback, "queue") as send:
+            self.assertFalse(m.try_deliver(self.config, self.root, self.runtime, 2,
+                lambda *_: {"status": "idle", "turn_id": "t", "turn_status": "completed"}, new_turn))
+            send.assert_not_called()
+
+    def test_shared_context_parallel_updates(self):
+        barrier = threading.Barrier(2)
+        def update(key):
+            event = {**self.event, "session_id": key, "prompt": key}
+            result = empty()
+            result["context_updates"] = [{"key": key, "value": key,
+                "source": {"location": key + "/t", "quote": key}}]
+            barrier.wait()
+            m.finalize(self.root, self.config, event, result, 0)
+        threads = [threading.Thread(target=update, args=(key,)) for key in ("a", "b")]
+        for thread in threads: thread.start()
+        for thread in threads: thread.join(3)
+        self.assertEqual(set(m.project_context(self.root, self.event)["facts"]), {"a", "b"})
+
+    def test_app_status_wire_and_identity(self):
+        pipe = str(self.base / "app.sock")
+        with socket.socket(socket.AF_UNIX) as server:
+            server.bind(pipe)
+            server.listen(1)
+            received = []
+            def reply():
+                with server.accept()[0] as stream:
+                    def read(n):
+                        value = b""
+                        while len(value) < n: value += stream.recv(n-len(value))
+                        return value
+                    received.append(json.loads(read(struct.unpack("<I", read(4))[0])))
+                    value = {"thread": {"id": "s", "status": {"type": "idle"}},
+                             "turns": [{"id": "t", "status": "completed"}]}
+                    data = json.dumps({"result": {"success": True, "contentItems": [
+                        {"type": "inputText", "text": json.dumps(value)}]}}).encode()
+                    frame = struct.pack("<I", len(data)) + data
+                    for start in range(0, len(frame), 7): stream.sendall(frame[start:start+7])
+            thread = threading.Thread(target=reply)
+            thread.start()
+            self.assertEqual(m.read_thread(pipe, "s"), {"status":"idle", "turn_id":"t", "turn_status":"completed"})
+            thread.join(3)
+            self.assertEqual(received[0]["params"]["tool"], "read_thread")
+        with self.assertRaisesRegex(RuntimeError, "source_status_unavailable"):
+            m.read_thread("", "s")
+
+    def test_new_app_pipe_invalidates_gate(self):
+        self.gate_fixture()
+        def restart(_):
+            state = m.read_json(self.runtime / "state.json")
+            state["app_pipe"] = "/new-app"
+            m.atomic(self.runtime / "state.json", state)
+        with patch.object(feedback, "queue") as send:
+            self.assertFalse(m.try_deliver(self.config, self.root, self.runtime, 2,
+                lambda *_: {"status":"idle", "turn_id":"t", "turn_status":"completed"}, restart))
+            send.assert_not_called()
+
+    def test_stop_during_gate_is_not_lost(self):
+        self.gate_fixture()
+        calls = []
+        def status(*_):
+            self.collect("Stop", turn_id="next", last_assistant_message="new evidence")
+            return {"status":"idle", "turn_id":"t", "turn_status":"completed"}
+        def evaluate(c, event):
+            calls.append(event["turn_id"])
+            return self.batch_result(event), 0
+        with patch.object(feedback, "queue") as send:
+            m.worker(self.cp, self.runtime, evaluate, status, lambda _: None, wait_seconds=0)
+            send.assert_not_called()
+        self.assertEqual(calls, ["next"])
+
+    def test_interrupted_finalization_does_not_reanalyze(self):
+        self.collect("Stop", last_assistant_message="done")
+        event = m.read_json(next((self.runtime / "queue").glob("*.json")))
+        m.finalize(self.root, self.config, event, empty(), 1)
+        m.worker(self.cp, self.runtime, lambda *_: self.fail("completed turn reanalyzed"), wait_seconds=0)
+        self.assertFalse(list((self.runtime / "queue").glob("*.json")))
+
+    def test_changed_evidence_blocks_delivery(self):
+        self.gate_fixture()
+        (self.project / "a.md").write_text("updated")
+        with patch.object(feedback, "queue") as send:
+            self.assertFalse(m.try_deliver(self.config, self.root, self.runtime, 2,
+                lambda *_: {"status":"idle", "turn_id":"t", "turn_status":"completed"}, lambda _: None))
+            send.assert_not_called()
+        self.assertEqual(m.read_json(self.runtime / "state.json")["blocked"], "evidence_changed")
+
+    def test_migration_is_one_shot_and_cannot_send_old_feedback(self):
+        item = self.finding()
+        old = self.root / "queue" / "old.json"
+        m.atomic(old, {**self.event, "turn_id":"old", "created":1, "revision":1, "ready":True})
+        m.migrate(self.root)
+        self.assertFalse(old.exists())
+        self.assertTrue((self.runtime / "queue" / "old.json").exists())
+        state = m.read_json(self.runtime / "state.json")
+        self.assertEqual(state["pending_feedback"], [item["id"]])
+        self.assertNotIn("analysis_revision", state)
+        m.migrate(self.root)
+        self.assertEqual(m.read_json(self.runtime / "state.json"), state)
+
+    def test_real_render_and_confirmation_messages(self):
+        item = self.finding()
+        self.collect("UserPromptSubmit", prompt=feedback.message([item]))
+        self.collect("Stop", last_assistant_message="")
+        self.work(lambda *_: self.fail("render invokes model"))
+        with patch.object(widget, "queue") as send:
+            widget.call(self.config, widget.ACTION_TOOL, {"session_id": "s", "finding_id": item["id"],
+                "action": "confirm", "selection": item["options"][0]})
+        text = send.call_args.args[2]
+        self.collect("UserPromptSubmit", turn_id="decision", prompt=text)
+        self.collect("Stop", turn_id="decision", last_assistant_message="handled")
+        calls = []
+        self.work(lambda c,e: (calls.append(e) or empty(), 0))
+        self.assertEqual(calls[0]["prompt"], text)
 
     def test_install_update_uninstall_preserves_user(self):
         home, apps = self.base / "codex", self.base / "apps"

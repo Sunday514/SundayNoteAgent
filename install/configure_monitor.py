@@ -7,17 +7,43 @@ from pathlib import Path
 import re
 import shlex
 import shutil
+import signal
 import sys
+import time
 import tomllib
 
 sys.dont_write_bytecode = True
 SOURCE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SOURCE / "automation" / "monitor"))
-from monitor import atomic, read_json, root_for
+from monitor import atomic, read_json, root_for, migrate
 
 MARKER = "SundayNoteAgent Monitor"
 MCP_BEGIN = "# BEGIN " + MARKER + " MCP\n"
 MCP_END = "# END " + MARKER + " MCP\n"
+
+
+def stop_workers(runtime, root):
+    state = read_json(root / "state.json", {})
+    atomic(root / "state.json", {**state, "enabled": False})
+    processes = []
+    for proc in Path("/proc").glob("[0-9]*"):
+        try:
+            args = (proc / "cmdline").read_bytes().decode().split("\0")
+            if str(runtime / "monitor.py") in args and "work" in args:
+                os.kill(int(proc.name), signal.SIGTERM)
+                processes.append(proc)
+        except (OSError, UnicodeError):
+            continue
+    deadline = time.monotonic() + 10
+    def alive(proc):
+        try:
+            return (proc / "stat").read_text().rsplit(")", 1)[1].split()[0] != "Z"
+        except FileNotFoundError:
+            return False
+    while any(alive(p) for p in processes):
+        if time.monotonic() >= deadline:
+            raise ValueError("旧 Monitor 执行器尚未退出，已暂停；请检查后重新安装")
+        time.sleep(.1)
 
 
 def configure_mcp(text, runtime, config_path, uninstall=False):
@@ -129,6 +155,7 @@ def configure(vault, codex_home, applications, uninstall=False, proxy_url=None):
         raise ValueError("缺少依赖：" + ", ".join(missing))
     updated, change = enable_hooks(updated)
     tomllib.loads(updated)
+    stop_workers(runtime, root)
     runtime.mkdir(parents=True, exist_ok=True)
     for p in (SOURCE / "automation" / "monitor").glob("*.py"):
         shutil.copy2(p, runtime / p.name)
@@ -152,8 +179,8 @@ def configure(vault, codex_home, applications, uninstall=False, proxy_url=None):
     atomic(hook_file, hooks)
     write_text(config_file, updated)
     atomic(install_state, {"feature_change": old.get("feature_change") or change})
-    state = read_json(root / "state.json", {})
-    atomic(root / "state.json", {**state, "enabled": True})
+    migrate(root)
+    atomic(root / "state.json", {"enabled": True})
     print("Monitor 已安装。请在 Codex /hooks 中审阅并信任两个 Hook，重新加载客户端的 MCP 工具后验证 widget。")
     print("日志及配置：" + str(root))
 
