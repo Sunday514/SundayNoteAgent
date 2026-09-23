@@ -37,14 +37,34 @@ def baseline(cwd):
 
 def review_base(cwd, state, turns):
     repo = baseline(cwd).get("repository")
-    if repo and state.get("target_repository") == repo:
-        if state.get("baseline_known") is not True:
+    saved = state.get("repository_baselines", {}).get(repo)
+    if saved is None and repo and state.get("target_repository") == repo:
+        saved = state
+    if saved is not None:
+        if saved.get("baseline_known") is not True:
             return ""
-        previous = state.get("review_base") or state.get("last_head")
+        previous = saved.get("review_base") or saved.get("last_head")
         if previous:
             return previous
     first = turns[0].get("git_baseline", {}) if turns else {}
     return first.get("head", "") if repo and first.get("repository") == repo else ""
+
+
+def save_review_base(state, target, pending):
+    entries = state.setdefault("repository_baselines", {})
+    legacy_repo = state.pop("target_repository", None)
+    legacy = {key: state.pop(key, None) for key in ("baseline_known", "last_head", "review_base")}
+    if legacy_repo:
+        entries.setdefault(legacy_repo, legacy)
+    repo = target.get("repository")
+    if not repo:
+        return
+    known = target.get("baseline_known") is True
+    entries[repo] = {
+        "baseline_known": known,
+        "last_head": target.get("head", "") if known else "",
+        "review_base": target.get("base") if known and pending else None,
+    }
 
 
 def collect_target(cwd, scratch, previous_head=""):

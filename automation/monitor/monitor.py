@@ -28,7 +28,7 @@ from feedback import MARKER, deliver
 from app_status import read_thread
 from contracts import (SUMMARY_SCHEMA, RESULT_SCHEMA, CHECKPOINT_SCHEMA,
                        CHECK_SCHEMA, validate, validate_feedback, resolve_handoff)
-from facts import baseline, review_base, collect_target, target_current, turn_tools, version_current, related_repositories
+from facts import baseline, review_base, save_review_base, collect_target, target_current, turn_tools, version_current, related_repositories
 
 
 def digest(value):
@@ -939,12 +939,8 @@ def worker(config_path, runtime, evaluator=evaluate, status_reader=read_thread,
                         merged = {c["direction"]: c for c in previous if c["status"] == "complete"}
                         merged.update({c["direction"]: c for c in value.get("checks", [])})
                         review = merged.get("review", {})
-                        known = target.get("baseline_known") is True
-                        state.update(last_head=target.get("head", "") if known else "",
-                                     baseline_known=known,
-                                     target_repository=target.get("repository") or state.get("target_repository"),
-                                     review_base=target.get("base") if known and (value.get("partial") or (review and review.get("status") != "complete")) else None,
-                                     target_id=target.get("target_id"), checks=list(merged.values()),
+                        save_review_base(state, target, value.get("partial") or (review and review.get("status") != "complete"))
+                        state.update(target_id=target.get("target_id"), checks=list(merged.values()),
                                      partial_checks=value.get("checks", []) if value.get("partial") else [],
                                      partial_feedback=value.get("feedback") if value.get("partial") else None)
                     for path, original in pending:

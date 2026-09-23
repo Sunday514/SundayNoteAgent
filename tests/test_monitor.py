@@ -1258,9 +1258,10 @@ else: raise SystemExit(1)
                     value.update(target=target, partial=partial)
                     self.work(lambda c, e: (value, 1))
                     state = m.read_json(self.runtime / "state.json")
-                    self.assertFalse(state["baseline_known"])
-                    self.assertEqual(state["last_head"], "")
-                    self.assertIsNone(state["review_base"])
+                    saved = state["repository_baselines"][str(self.project)]
+                    self.assertFalse(saved["baseline_known"])
+                    self.assertEqual(saved["last_head"], "")
+                    self.assertIsNone(saved["review_base"])
                     later = [{"git_baseline": facts.baseline(self.project)}]
                     next_base = facts.review_base(self.project, state, later)
                     self.assertEqual(next_base, "")
@@ -1272,6 +1273,41 @@ else: raise SystemExit(1)
         self.assertEqual(facts.review_base(self.project, trusted, []), facts.head(self.project))
         trusted.pop("baseline_known")
         self.assertEqual(facts.review_base(self.project, trusted, []), "")
+
+    def test_repository_switch_preserves_unknown_and_known_baselines(self):
+        import facts
+        for repo in (self.project, self.vault):
+            facts.git(repo, "init")
+            (repo / "a").write_text("initial")
+            facts.git(repo, "add", ".")
+            facts.git(repo, "-c", "user.name=Test", "-c", "user.email=t@example.invalid", "commit", "-m", "initial")
+        self.runtime = m.session_runtime(self.root, self.event)
+        # Start from the previous on-disk format; migration must preserve A.
+        m.atomic(self.runtime / "state.json", {
+            "target_repository": str(self.project), "baseline_known": False,
+            "last_head": "", "review_base": None,
+        })
+        for index, repo in enumerate((self.vault, self.project, self.vault)):
+            self.event["turn_id"] = f"switch-{index}"
+            self.collect("UserPromptSubmit", prompt="inspect")
+            self.collect("Stop", last_assistant_message="done")
+            state = m.read_json(self.runtime / "state.json")
+            turns = [{"git_baseline": facts.baseline(repo)}]
+            base = facts.review_base(repo, state, turns)
+            scratch = self.base / f"switch-{index}"
+            scratch.mkdir()
+            target = facts.collect_target(repo, scratch, base)
+            self.assertEqual(target["complete"], repo == self.vault)
+            value = empty()
+            value["target"] = target
+            self.work(lambda c, e: (value, 1))
+            state = m.read_json(self.runtime / "state.json")
+            self.assertFalse(state["repository_baselines"][str(self.project)]["baseline_known"])
+            self.assertTrue(state["repository_baselines"][str(self.vault)]["baseline_known"])
+            self.assertNotIn("target_repository", state)
+        saved = json.loads(json.dumps(state["repository_baselines"]))
+        facts.save_review_base(state, {"available": False}, False)
+        self.assertEqual(state["repository_baselines"], saved)
 
     def test_usage_does_not_claim_parent_is_total(self):
         trace = self.base / "events.jsonl"
@@ -1298,13 +1334,13 @@ else: raise SystemExit(1)
         self.collect("Stop", last_assistant_message="changed")
         value = empty()
         value.update(partial=True, limitations=["timeout"], checks=[],
-                     target={"head": "new", "base": "old", "target_id": "target", "baseline_known": True},
+                     target={"repository": str(self.project), "head": "new", "base": "old", "target_id": "target", "baseline_known": True},
                      feedback=report([{"title": "possible", "reason": "needs review", "check": "review", "evidence": [{"location": "s/t", "quote": "changed"}]}]))
         value["context_updates"] = [{"key": "unverified", "value": "new", "source": {"location": "s/t", "quote": "changed"}}]
         self.work(lambda c, e: (value, 600))
         state = m.read_json(self.runtime / "state.json")
         self.assertNotIn("analysis_revision", state)
-        self.assertEqual(state["review_base"], "old")
+        self.assertEqual(state["repository_baselines"][str(self.project)]["review_base"], "old")
         self.assertNotIn("unverified", m.project_context(self.root, self.event)["facts"])
         self.assertEqual(state["partial_feedback"]["findings"][0]["title"], "possible")
         self.assertFalse(list((self.root / "findings").glob("*.json")))
