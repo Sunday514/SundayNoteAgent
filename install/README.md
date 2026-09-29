@@ -66,7 +66,11 @@ Syncthing 的 `.stignore` 是设备本地文件，各设备需按自身模式安
 
 ## Monitor（可选）
 
-Monitor 是只读会话检查旁路，不参与正常 Query/Ingest，也不替代正式 Review。安装与停用：
+Monitor 是只读会话检查旁路，不参与正常 Query/Ingest，也不替代正式 Review。子报告方向和目标由宿主绑定，阅读索引不要求摘录或模型计算 hash；单条坏证据或单方向失败不阻塞其他有效发现，过滤后取消可能依赖它的决策。无最终汇总时不推送，同版本有限覆盖不因基线未知反复检查。
+
+Vault 布局和项目入口由 Skill 的 `references/vault.md` 维护，不放入动态项目上下文；检查实际矛盾及关键变化尚未承接，普通实现细节不要求更新文档。主会话处理前核实当前证据及适用性。
+
+安装与停用：
 
 ```bash
 bash SundayNoteAgent/install/install.sh --vault-root . --with-monitor --monitor-only

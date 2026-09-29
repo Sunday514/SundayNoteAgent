@@ -234,14 +234,3 @@ def turn_tools(path, session_id, turn_ids):
     except (OSError, ValueError, TypeError):
         pass
     return result
-
-
-if __name__ == "__main__":
-    # Read evidence once; return a digest for the child report's read_versions.
-    import sys
-    p = Path(sys.argv[1]).resolve()
-    if not p.is_file() or p.stat().st_size > MAX_SNAPSHOT:
-        raise SystemExit("not a bounded regular file")
-    data = p.read_bytes()
-    print(json.dumps({"path": str(p), "sha256": sha(data)}, ensure_ascii=False))
-    print(data.decode(errors="replace"))

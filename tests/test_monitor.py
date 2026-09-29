@@ -51,10 +51,78 @@ class MonitorTests(unittest.TestCase):
         checks = [{"direction":"review", "status":"complete", "findings":[finding]}]
         handoff = {"summary":"summary", "findings":[{"direction":"review", "index":0}], "decision":None}
         self.assertEqual(resolve_handoff(handoff, checks)["findings"], [finding])
-        with self.assertRaises(ValueError):
-            resolve_handoff(handoff, [])
-        with self.assertRaises(ValueError):
-            resolve_handoff({**handoff, "findings":[{"direction":"review", "index":3}]}, checks)
+        self.assertIsNone(resolve_handoff(handoff, []))
+        self.assertIsNone(resolve_handoff({**handoff, "findings":[{"direction":"review", "index":3}]}, checks))
+
+    def test_bad_evidence_preserves_indexes(self):
+        from contracts import resolve_handoff
+        (self.base / "checks").mkdir()
+        source = self.project / "source.py"
+        source.write_text("valid evidence\n")
+        good = {"title": "good", "reason": "impact", "check": "consistency",
+                "evidence": [{"location": str(source), "quote": "valid evidence"}]}
+        bad = {**good, "evidence": [{"location": str(source), "quote": "missing"}]}
+        m.atomic(self.base / "checks/consistency.json", {"status": "complete",
+                 "findings": [bad, good], "checked": [str(source), "/outside/missing"], "limitations": []})
+        (self.base / "checks/review.json").write_text("not json")
+        checks, _, issues = m.execution_artifacts(self.base, {**self.event, "_turns": [self.event]}, {}, self.config)
+        self.assertIsNone(checks[0]["findings"][0])
+        self.assertEqual(checks[0]["findings"][1], good)
+        handoff = report([{"direction": "consistency", "index": 0}, {"direction": "consistency", "index": 1},
+                          {"direction": "review", "index": 0}])
+        resolved = resolve_handoff(handoff, checks)
+        self.assertEqual(resolved["findings"], [good])
+        self.assertIsNone(resolved["decision"])
+        self.assertTrue(issues)
+
+    def test_analysis_records_keep_retries(self):
+        for started in (1, 1, 2):
+            m.append_record(self.root, self.event, {"kind": "analysis", "started": started})
+            m.append_record(self.root, self.event, {"kind": "registered"})
+        self.assertEqual(sum(r['kind'] == 'analysis' for r in self.rows()), 2)
+        self.assertEqual(sum(r['kind'] == 'registered' for r in self.rows()), 1)
+
+    def test_evaluate_nonfatal_index_and_child_failure(self):
+        def run(argv, **kwargs):
+            if argv[1:3] == ["login", "status"]:
+                return 0, "Logged in using ChatGPT"
+            scratch = Path(kwargs['cwd'])
+            (scratch / "checks/review.json").write_text("invalid report")
+            m.atomic(scratch / "result.json", {"context_updates": [], "checked": ["/outside/missing"],
+                     "feedback": None, "summaries": [{"turn_id": "t", "summary": empty()["summary"]}]})
+            return 0, ""
+        event = {**self.event, "codex": sys.executable, "_turns": [self.event]}
+        with patch.object(m, "sandbox_probe"), patch.object(m, "run_process", side_effect=run):
+            result, _ = m.evaluate(self.config, event)
+        self.assertFalse(result['partial'])
+        self.assertEqual(result['checked'], [])
+        self.assertTrue(result['limitations'])
+
+    def test_partial_review_reused_only_for_same_target(self):
+        source = self.project / 'source.py'
+        source.write_text('evidence')
+        finding = {'title': 'issue', 'reason': 'impact', 'check': 'review',
+                   'evidence': [{'location': str(source), 'quote': 'evidence'}]}
+        cached = {'direction': 'review', 'target_id': 'same', 'handoff_version': 2,
+                  'status': 'partial', 'findings': [finding], 'checked': [], 'limitations': ['incomplete_target']}
+        m.atomic(self.runtime / 'state.json', {'target_id': 'same', 'checks': [cached]})
+        def run(argv, **kwargs):
+            if argv[1:3] == ['login', 'status']:
+                return 0, 'Logged in using ChatGPT'
+            scratch = Path(kwargs['cwd'])
+            prior = m.read_json(scratch / 'review-brief.json')['prior_checks']
+            m.atomic(scratch / 'result.json', {'context_updates': [], 'checked': [],
+                'feedback': report([{'direction': 'review', 'index': 0}], question=None) if prior else None,
+                'summaries': [{'turn_id': 't', 'summary': empty()['summary']}]})
+            return 0, ''
+        event = {**self.event, 'codex': sys.executable, '_turns': [self.event]}
+        for target_id, expected in [('same', True), ('changed', False)]:
+            with patch.object(m, 'sandbox_probe'), patch.object(m, 'run_process', side_effect=run), \
+                 patch.object(m, 'collect_target', return_value={'target_id': target_id}), \
+                 patch.object(m, 'target_current', return_value=True):
+                value, _ = m.evaluate(self.config, event)
+            self.assertFalse(value['partial'])
+            self.assertEqual(bool(value['feedback']), expected)
 
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -353,8 +421,11 @@ class MonitorTests(unittest.TestCase):
         self.assertEqual(m.finalize(self.root, self.config, self.event, result, 1), new)
         self.assertEqual(m.read_json(self.root / "findings" / (new[0] + ".json"))["target"], result["target"])
         item["evidence"][0]["quote"] = "nonexistent"
-        with self.assertRaises(ValueError):
-            m.finalize(self.root,self.config,self.event,result,1)
+        self.assertEqual(m.finalize(self.root,self.config,self.event,result,1), [])
+        valid = {**item, "evidence": [{"location": str(file), "quote": "old entry"}]}
+        filtered = m.verified_feedback(report([item, valid]), self.event, self.config)
+        self.assertEqual(len(filtered["findings"]), 1)
+        self.assertIsNone(filtered["decision"])
 
     def test_feedback_dedup_uses_content_with_empty_title(self):
         file = self.project / "source.md"
@@ -1157,14 +1228,14 @@ else: raise SystemExit(1)
         (self.base / "checks").mkdir()
         source = self.project / "a.py"
         source.write_text("before")
-        check = {"direction": "review", "target_id": "target", "status": "complete",
-                 "findings": [], "checked": [], "read_versions": [{"path": str(source), "sha256": facts.sha(source.read_bytes())}], "limitations": []}
+        check = {"status": "complete", "findings": [], "checked": [], "limitations": []}
         m.atomic(self.base / "checks/review.json", check)
         m.atomic(self.base / "checkpoint.json", {"summaries": [{"turn_id": "t", "summary": empty()["summary"]}]})
         event = {**self.event, "_turns": [self.event]}
         source.write_text("after")
         checks, summaries, issues = m.execution_artifacts(self.base, event, {"target_id": "target", "complete": True})
-        self.assertEqual(checks[0]["status"], "partial")
+        self.assertEqual(checks[0]["status"], "complete")
+        self.assertEqual(checks[0]["target_id"], "target")
         self.assertEqual(summaries[0]["turn_id"], "t")
         self.assertEqual(issues, [])
         m.atomic(self.base / "checkpoint.json", {"summaries": [{"turn_id": "wrong", "summary": empty()["summary"]}]})
@@ -1388,14 +1459,15 @@ else: raise SystemExit(1)
 
     def test_check_versions_reject_outside_scope_before_reading(self):
         (self.base / "checks").mkdir()
-        check = {"direction": "consistency", "target_id": "", "status": "complete", "findings": [],
-                 "checked": [], "read_versions": [{"path": "/outside/private", "sha256": "abc"}], "limitations": []}
+        check = {"status": "complete", "findings": [],
+                 "checked": ["/outside/private"], "limitations": []}
         m.atomic(self.base / "checks/consistency.json", check)
         with patch.object(m, "version_current") as read:
             checks, _, issues = m.execution_artifacts(self.base, {**self.event, "_turns": [self.event]}, {}, self.config)
             read.assert_not_called()
-        self.assertEqual(checks, [])
-        self.assertEqual(issues, ["invalid_check:consistency:check version outside reference scope"])
+        self.assertEqual(checks[0]["checked"], [])
+        self.assertEqual(checks[0]["limitations"], ["invalid_reading_index:/outside/private"])
+        self.assertEqual(issues, [])
 
 
 if __name__ == "__main__":

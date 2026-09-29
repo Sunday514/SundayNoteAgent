@@ -20,15 +20,13 @@ SUMMARIES = {"type": "array", "items": obj({"turn_id": STR, "summary": SUMMARY_S
 RESULT_SCHEMA = obj({
     "context_updates": {"type": "array", "items": obj({"key": STR, "value": STR, "source": SOURCE})},
     "summaries": SUMMARIES,
-    "checked": {"type": "array", "items": SOURCE},
+    "checked": {"type": "array", "items": STR},
     "feedback": {"anyOf": [HANDOFF, {"type": "null"}]},
 })
 CHECKPOINT_SCHEMA = obj({"summaries": SUMMARIES})
-CHECK_SCHEMA = obj({"direction": {"type": "string", "enum": ["consistency", "redundancy", "knowledge", "review"]},
-                    "target_id": STR, "status": {"type": "string", "enum": ["complete", "partial", "failed"]},
+CHECK_SCHEMA = obj({"status": {"type": "string", "enum": ["complete", "partial", "failed"]},
                     "findings": {"type": "array", "items": FINDING},
-                    "checked": {"type": "array", "items": SOURCE},
-                    "read_versions": {"type": "array", "items": obj({"path": STR, "sha256": STR})},
+                    "checked": {"type": "array", "items": STR},
                     "limitations": {"type": "array", "items": STR}})
 
 
@@ -79,14 +77,20 @@ def resolve_handoff(feedback, checks):
     validate(feedback, HANDOFF)
     reports = {c["direction"]: c for c in checks if c["status"] != "failed"}
     findings = []
+    dropped = False
     for item in feedback["findings"]:
         if "index" in item:
             try:
                 item = reports[item["direction"]]["findings"][item["index"]]
             except (KeyError, IndexError):
-                raise ValueError("invalid finding reference") from None
+                item = None
+        if item is None:
+            dropped = True
+            continue
         if item not in findings:
             findings.append(item)
-    result = {**feedback, "findings": findings}
+    if not findings:
+        return None
+    result = {**feedback, "findings": findings, "decision": None if dropped else feedback["decision"]}
     validate_feedback(result)
     return result
