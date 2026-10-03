@@ -69,16 +69,11 @@ def main() -> None:
             assert (skill_dir / relative_path).is_file(), f"missing resource: {relative_path}"
 
     paper_skill = ROOT / "skills" / "paper-summarizer" / "SKILL.md"
-    paper_frontmatter, paper_body = parse_skill(paper_skill)
+    paper_frontmatter, _ = parse_skill(paper_skill)
     assert paper_frontmatter == {
         "name": "paper-summarizer",
         "description": PAPER_DESCRIPTION,
     }, paper_skill
-    assert "summary_evidence.json" in paper_body, paper_skill
-    assert "conda run -n papers python" in paper_body, paper_skill
-    assert "已长期授权" in paper_body, paper_skill
-    assert "无需确认" in paper_body, paper_skill
-    assert "write_summary_status.py" not in paper_body, paper_skill
 
     print("skill packaging fixture passed")
 

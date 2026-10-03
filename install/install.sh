@@ -34,7 +34,7 @@ Usage:
 Install or update SundayNoteAgent-managed files from the current checkout.
 Without --vault-root, the vault root is the parent of SundayNoteAgent/.
 The installer creates missing vault-local files and refreshes only managed files and plugin fields.
-Paper summarizer is optional because it requires a docling-capable environment.
+Paper summarizer is optional and uses the agent's available PDF reading tools.
 Mode defaults to personal on first install and is remembered for updates.
 Work mode creates only work partitions, work templates and work entry points.
 Routine templates default to managed. Use preserve to leave existing templates
@@ -445,7 +445,11 @@ if [ "$install_paper_summarizer" -eq 1 ]; then
   copy_managed_dir "$SOURCE_ROOT/skills/paper-summarizer" "$paper_skill_path"
   rm -f \
     "$paper_skill_path/assets/embodied_ai_terminology.json" \
-    "$paper_skill_path/scripts/write_summary_status.py"
+    "$paper_skill_path/scripts/write_summary_status.py" \
+    "$paper_skill_path/assets/summary_template.json" \
+    "$paper_skill_path/scripts/docling_parser.py" \
+    "$paper_skill_path/scripts/prepare_paper_summary.py" \
+    "$paper_skill_path/scripts/validate_summary.py"
 fi
 
 if [ -n "$OPTIONAL_CONFIG_PYTHON" ]; then

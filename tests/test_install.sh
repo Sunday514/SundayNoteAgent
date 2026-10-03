@@ -404,16 +404,29 @@ fi
 assert_same_file "$TMP_ROOT/duplicate-personal" "$crlf_vault/AGENTS.md"
 
 printf '%s\n' "stale optional skill" > "$vault/.agents/skills/paper-summarizer/SKILL.md"
-printf '%s\n' "obsolete status script" > "$vault/.agents/skills/paper-summarizer/scripts/write_summary_status.py"
-printf '%s\n' '{}' > "$vault/.agents/skills/paper-summarizer/assets/embodied_ai_terminology.json"
+paper_legacy_files=(
+  scripts/write_summary_status.py assets/embodied_ai_terminology.json
+  scripts/docling_parser.py scripts/prepare_paper_summary.py
+  scripts/validate_summary.py assets/summary_template.json
+)
+mkdir -p "$vault/.agents/skills/paper-summarizer/scripts" "$vault/.agents/skills/paper-summarizer/assets"
+for file in "${paper_legacy_files[@]}"; do
+  printf '%s\n' 'obsolete paper resource' > "$vault/.agents/skills/paper-summarizer/$file"
+done
 printf '%s\n' "local paper extension" > "$vault/.agents/skills/paper-summarizer/local.md"
+printf '%s\n' "local helper" > "$vault/.agents/skills/paper-summarizer/scripts/local.py"
+mkdir -p "$vault/.import_files/old-paper/_work"
+printf '%s\n' "existing parse" > "$vault/.import_files/old-paper/_work/parsed.md"
 bash "$ROOT/install/install.sh" --vault-root "$vault" >/dev/null
 if grep -Fq "stale optional skill" "$vault/.agents/skills/paper-summarizer/SKILL.md"; then
   fail "enabled optional skill was not refreshed"
 fi
-test ! -e "$vault/.agents/skills/paper-summarizer/scripts/write_summary_status.py" || fail "obsolete paper status script was not removed"
-test ! -e "$vault/.agents/skills/paper-summarizer/assets/embodied_ai_terminology.json" || fail "obsolete paper terminology asset was not removed"
+for file in "${paper_legacy_files[@]}"; do
+  test ! -e "$vault/.agents/skills/paper-summarizer/$file" || fail "obsolete paper resource was not removed: $file"
+done
 assert_file_contains "$vault/.agents/skills/paper-summarizer/local.md" "local paper extension"
+assert_file_contains "$vault/.agents/skills/paper-summarizer/scripts/local.py" "local helper"
+assert_file_contains "$vault/.import_files/old-paper/_work/parsed.md" "existing parse"
 assert_local_content_unchanged
 assert_source_tree_exported "$ROOT/skills/paper-summarizer" "$vault/.agents/skills/paper-summarizer"
 assert_same_file "$ROOT/templates/每周记录.md" "$vault/个人模板/每周记录.md"

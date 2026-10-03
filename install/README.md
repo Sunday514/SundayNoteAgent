@@ -43,7 +43,7 @@ bash SundayNoteAgent/install/install.sh --vault-root .
 | `--with-monitor --monitor-only` | 只更新 Monitor，不改变 vault 安装模式、模板和其他工具 |
 | `--without-monitor --monitor-only` | 卸载 Monitor 托管入口，保留日志 |
 
-先自行安装并启用需要的 Obsidian 插件。插件缺失时核心安装仍完成，并报告跳过的集成。保留模板时，QuickAdd 创建每日记录仍要求当前模式的固定路径下已有模板。论文总结依赖 Docling，当前 Python 不可用时按 Skill 使用 `conda run -n papers python`。
+先自行安装并启用需要的 Obsidian 插件。插件缺失时核心安装仍完成，并报告跳过的集成。保留模板时，QuickAdd 创建每日记录仍要求当前模式的固定路径下已有模板。论文总结使用 Agent 当前可用的 PDF 读取和页面渲染工具，不依赖 Docling 或指定 Conda 环境；缺少阅读能力时说明限制，不自动安装依赖。更新只清理已知废弃脚本和模板，保留旧论文工作区和用户额外文件。
 
 ## 托管边界
 
