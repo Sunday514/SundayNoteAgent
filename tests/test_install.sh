@@ -90,8 +90,10 @@ for required_dir in \
 done
 assert_file_contains "$vault/.stignore" "/SundayNoteAgent"
 assert_file_contains "$vault/.stignore" "/.import_files"
-assert_same_file "$ROOT/install/scaffold/.stignore" "$vault/.stignore"
-assert_same_file "$ROOT/install/scaffold/AGENTS.md" "$vault/AGENTS.md"
+{ printf '%s\n' '// BEGIN SundayNoteAgent managed ignores'; cat "$ROOT/install/scaffold/.stignore"; printf '%s\n' '// END SundayNoteAgent managed ignores'; } > "$TMP_ROOT/personal-stignore"
+assert_same_file "$TMP_ROOT/personal-stignore" "$vault/.stignore"
+{ cat "$ROOT/install/scaffold/AGENTS.md"; printf '\n'; cat "$ROOT/install/scaffold/personal.md"; } > "$TMP_ROOT/personal-agents.md"
+assert_same_file "$TMP_ROOT/personal-agents.md" "$vault/AGENTS.md"
 assert_same_file "$ROOT/skills/sunday-note-context/assets/个人上下文.md" "$vault/个人上下文.md"
 
 assert_same_file "$ROOT/templates/每周记录.md" "$vault/个人模板/每周记录.md"
@@ -417,7 +419,7 @@ assert_source_tree_exported "$ROOT/skills/paper-summarizer" "$vault/.agents/skil
 assert_same_file "$ROOT/templates/每周记录.md" "$vault/个人模板/每周记录.md"
 assert_same_file "$ROOT/templates/每月记录.md" "$vault/个人模板/每月记录.md"
 while IFS= read -r pattern || [ -n "$pattern" ]; do
-  case "$pattern" in ''|\#*) continue ;; esac
+  case "$pattern" in ''|\#*|//*) continue ;; esac
   test "$(grep -Fxc -- "$pattern" "$vault/.stignore")" -eq 1 || fail "Syncthing rule missing or duplicated: $pattern"
 done < "$ROOT/install/scaffold/.stignore"
 
@@ -427,5 +429,104 @@ if bash "$ROOT/install/install.sh" --vault-root "$stignore_conflict" >"$TMP_ROOT
   fail "directory at .stignore did not stop installation"
 fi
 assert_file_contains "$TMP_ROOT/stignore-conflict.out" "$stignore_conflict/.stignore"
+
+work="$TMP_ROOT/work"
+mkdir -p "$work/SundayNoteAgent" "$work/.obsidian/plugins/calendar" "$work/.obsidian/plugins/quickadd"
+printf '%s\n' '["calendar","quickadd"]' > "$work/.obsidian/community-plugins.json"
+printf '%s\n' '{"id":"calendar"}' > "$work/.obsidian/plugins/calendar/manifest.json"
+printf '%s\n' '{"id":"quickadd"}' > "$work/.obsidian/plugins/quickadd/manifest.json"
+printf '%s\n' '{"daily-notes":true}' > "$work/.obsidian/core-plugins.json"
+printf '%s\n' '{"choices":[{"id":"custom","name":"用户入口"},{"id":"sunday-note-create-diary","name":"创建今日日记"}]}' > "$work/.obsidian/plugins/quickadd/data.json"
+bash "$ROOT/install/install.sh" --vault-root "$work" --mode work --with-paper-summarizer >/dev/null
+for layer in 10_原始材料 20_每日记录 21_每周记录 22_每月记录 23_项目复盘; do
+  test -d "$work/$layer/工作" || fail "work partition missing: $layer"
+  test ! -e "$work/$layer/个人" || fail "work mode created personal partition: $layer"
+done
+for forbidden in 个人模板 个人上下文.md 40_个人写作 assets/个人 .agents/skills/sunday-note-context; do
+  test ! -e "$work/$forbidden" || fail "work mode created personal content: $forbidden"
+done
+test -d "$work/assets/工作/figures" || fail "work assets missing"
+test -d "$work/30_知识库" || fail "work wiki missing"
+for name in 每日记录 每周记录 每月记录; do
+  assert_same_file "$ROOT/templates/work/$name.md" "$work/工作模板/$name.md"
+done
+assert_source_tree_exported "$ROOT/skills/sunday-note-ingest" "$work/.agents/skills/sunday-note-ingest"
+assert_source_tree_exported "$ROOT/skills/sunday-note-query" "$work/.agents/skills/sunday-note-query"
+assert_source_tree_exported "$ROOT/skills/paper-summarizer" "$work/.agents/skills/paper-summarizer"
+assert_file_contains "$work/AGENTS.md" '## 工作模式'
+assert_file_contains "$work/.sunday-note-agent/install-mode" 'work'
+assert_file_contains "$work/.obsidian/daily-notes.json" '20_每日记录/工作'
+assert_file_contains "$work/.obsidian/plugins/calendar/data.json" '工作模板/每周记录.md'
+python - "$work" <<'PY'
+import json, sys
+from pathlib import Path
+root = Path(sys.argv[1])
+choices = json.loads((root / '.obsidian/plugins/quickadd/data.json').read_text())['choices']
+assert {c['id'] for c in choices} == {'custom', 'sunday-note-create-daily'}
+daily = next(c for c in choices if c['id'] == 'sunday-note-create-daily')
+assert daily['macro']['commands'][0]['settings'] == {'mode': 'work'}
+assert '个人' not in (root / '首页.md').read_text()
+PY
+cp "$work/AGENTS.md" "$TMP_ROOT/work-agents-before"
+cp "$work/.obsidian/plugins/quickadd/data.json" "$TMP_ROOT/work-quickadd-before"
+bash "$ROOT/install/install.sh" --vault-root "$work" >/dev/null
+assert_same_file "$TMP_ROOT/work-agents-before" "$work/AGENTS.md"
+assert_same_file "$TMP_ROOT/work-quickadd-before" "$work/.obsidian/plugins/quickadd/data.json"
+test ! -e "$work/个人上下文.md" || fail "update forgot work mode"
+
+work_preserved="$TMP_ROOT/work-preserved"
+mkdir -p "$work_preserved/SundayNoteAgent"
+bash "$ROOT/install/install.sh" --vault-root "$work_preserved" --mode work --routine-templates preserve >/dev/null
+test ! -e "$work_preserved/工作模板" || fail "preserve created work templates"
+test ! -e "$work_preserved/个人模板" || fail "preserve created personal templates"
+if bash "$ROOT/install/install.sh" --vault-root "$work" --mode invalid >/dev/null 2>&1; then
+  fail "invalid mode accepted"
+fi
+assert_same_file "$TMP_ROOT/work-agents-before" "$work/AGENTS.md"
+
+printf '%s\n' 'invalid' > "$work/.sunday-note-agent/install-mode"
+if bash "$ROOT/install/install.sh" --vault-root "$work" >/dev/null 2>&1; then
+  fail "corrupt saved mode silently fell back to personal"
+fi
+assert_same_file "$TMP_ROOT/work-agents-before" "$work/AGENTS.md"
+printf '%s\n' 'work' > "$work/.sunday-note-agent/install-mode"
+
+cp "$vault/AGENTS.md" "$TMP_ROOT/personal-agents-before-work"
+if bash "$ROOT/install/install.sh" --vault-root "$vault" --mode work >/dev/null 2>&1; then
+  fail "work mode accepted personal response instructions"
+fi
+assert_same_file "$TMP_ROOT/personal-agents-before-work" "$vault/AGENTS.md"
+assert_file_contains "$vault/.sunday-note-agent/install-mode" 'personal'
+
+sync_vault="$TMP_ROOT/sync-vault"
+mkdir -p "$sync_vault/SundayNoteAgent"
+printf '%s\n' '!/10_原始材料/个人/**' '#include user.stignore' '/custom-local' > "$sync_vault/.stignore"
+cp "$sync_vault/.stignore" "$TMP_ROOT/user-stignore"
+bash "$ROOT/install/install.sh" --vault-root "$sync_vault" --mode work >/dev/null
+python - "$sync_vault/.stignore" "$TMP_ROOT/user-stignore" <<'PY'
+from pathlib import Path
+import sys
+text = Path(sys.argv[1]).read_text()
+assert text.endswith(Path(sys.argv[2]).read_text())
+for layer in ('10_原始材料', '20_每日记录', '21_每周记录', '22_每月记录', '23_项目复盘', 'assets'):
+    assert f'/{layer}/个人\n' in text
+    assert f'/{layer}/工作\n' not in text
+for path in ('40_个人写作', '个人模板', '个人上下文.md', '.import_files', '.logs'):
+    assert f'/{path}\n' in text
+assert text.index('/10_原始材料/个人\n') < text.index('!/10_原始材料/个人/**')
+PY
+cp "$sync_vault/.stignore" "$TMP_ROOT/work-stignore"
+bash "$ROOT/install/install.sh" --vault-root "$sync_vault" >/dev/null
+assert_same_file "$TMP_ROOT/work-stignore" "$sync_vault/.stignore"
+bash "$ROOT/install/install.sh" --vault-root "$sync_vault" --mode personal >/dev/null
+python - "$sync_vault/.stignore" "$TMP_ROOT/user-stignore" <<'PY'
+from pathlib import Path
+import sys
+text = Path(sys.argv[1]).read_text()
+assert text.endswith(Path(sys.argv[2]).read_text())
+managed = text.split('// END SundayNoteAgent managed ignores')[0]
+assert '/.import_files' in managed
+assert '/个人' not in managed and '/40_个人写作' not in managed
+PY
 
 echo "install fixture passed"

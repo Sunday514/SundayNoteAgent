@@ -1,82 +1,34 @@
 # SundayNoteAgent
 
-SundayNoteAgent 是一套用于 Obsidian 知识库的 agent 工具层。它提供安装器、Codex / agent skills、QuickAdd 自动化脚本、固定 vault 布局和最小 Routine 模板，适合放在私人知识库中的 `SundayNoteAgent/` 目录下作为工具层独立 repo 使用。
+SundayNoteAgent 是一套用于个人或工作 Obsidian 知识库的 agent 工具层。它提供安装器、Codex / agent skills、QuickAdd 自动化脚本、固定 vault 布局和最小 Routine 模板，放在 vault 的 `SundayNoteAgent/` 目录下作为独立 repo 使用。
 
 个人笔记、带具体条目的个人模板、附件、图片和本地运行状态由父知识库管理，不属于本仓库。
 
-## 安装
+## 安装与更新
 
-在 vault 根目录拉下工具层，然后安装配置和目录骨架：
+在 vault 根目录放置本仓库，首次安装选择个人或工作模式：
 
 ```bash
-mkdir -p ~/Notes/MyVault
-cd ~/Notes/MyVault
 git clone git@github.com:Sunday514/SundayNoteAgent.git SundayNoteAgent
-bash SundayNoteAgent/install/install.sh
+bash SundayNoteAgent/install/install.sh --vault-root . --mode personal
+# 独立工作 vault 使用 --mode work
 ```
 
-在已有知识库中安装：
+- `personal`：工作与个人分区、个人 Routine、写作及个性化上下文。
+- `work`：只创建工作原始材料、日/周/月记录、项目复盘、工作附件和统一 Wiki；使用工作模板，不创建个人内容或日记/打卡入口。
+
+两种模式共用 Ingest、Query、Lint。安装器同时维护本机 `.stignore`，排除导入中间产物和运行状态；工作模式额外排除个人目录、附件、模板及上下文的同步。
+
+安装器记住模式，后续更新直接重跑：
 
 ```bash
-cd ~/Notes/MyVault
-git clone git@github.com:Sunday514/SundayNoteAgent.git SundayNoteAgent
+git -C SundayNoteAgent pull --ff-only
 bash SundayNoteAgent/install/install.sh --vault-root .
 ```
 
-需要启用论文总结时，在安装命令中增加可选组件：
+已有自定义模板时加 `--routine-templates preserve`。论文总结和 Monitor 分别通过 `--with-paper-summarizer`、`--with-monitor` 启用。安装前关闭 Obsidian，安装后重新打开；安装器不删除已有内容，也不自动执行 Git 操作。
 
-```bash
-bash SundayNoteAgent/install/install.sh --vault-root . --with-paper-summarizer
-```
-
-已有自己的 Daily、Weekly、Monthly 模板或 Calendar 创建规则时，保留它们并跳过托管模板部署：
-
-```bash
-bash SundayNoteAgent/install/install.sh --vault-root . --routine-templates preserve
-```
-
-本地验证或使用 fork 时：
-
-```bash
-mkdir -p /tmp/my-vault-test
-cd /tmp/my-vault-test
-git clone /path/to/SundayNoteAgent SundayNoteAgent
-bash SundayNoteAgent/install/install.sh
-```
-
-## 安装后内容
-
-安装器会创建父知识库骨架并设置 agent 工具入口：
-
-```text
-.agents/skills/sunday-note-ingest                  # 安装器托管副本
-.agents/skills/sunday-note-lint                    # 安装器托管副本
-.agents/skills/sunday-note-query                   # 安装器托管副本
-.agents/skills/sunday-note-context                 # 安装器托管副本
-.agents/skills/paper-summarizer                    # 安装器托管副本，可选
-.stignore                                          # 文档同步的本地忽略规则
-个人模板/每日记录.md、每周记录.md、每月记录.md          # Routine 最小骨架
-个人上下文.md                                     # 根目录五章空页面，只在缺失时创建
-```
-
-默认的 `--routine-templates managed` 会刷新托管的 Weekly 和 Monthly 模板，并在缺失时创建 Daily 模板。`--routine-templates preserve` 不创建或刷新模板，也不修改 Calendar 与 Daily Notes 的模板设置。两种模式都会刷新托管的根规则和 skills，并保留个人上下文与已生成的个性化响应段。论文总结 skill 首次启用时传入 `--with-paper-summarizer`；启用后普通重跑也会继续更新。当前 Python 缺少 Docling 时，Skill 已长期授权使用 `conda run -n papers python`，无需确认。
-
-安装完成后可主动要求 agent“初始化个人上下文”，具体流程见[安装器说明](install/README.md)。
-
-用户先安装并启用需要的 Obsidian 插件，然后关闭 Obsidian、运行安装器，完成后再启动 Obsidian。模板模式为 `managed` 时，安装器维护已启用 Daily Notes 的个人每日目录和模板，以及 Calendar 的个人周记录字段；`preserve` 模式保留这些设置。QuickAdd 提供每日记录、日记创建及周/月统计四个入口，脚本从 `SundayNoteAgent/automation/quickadd/` 加载。其他插件字段、choices 和社区插件启用列表保持不变。缺失的可选插件不会阻断核心安装，安装结果会列出未配置的工作流。
-
-## 更新
-
-更新工具层后，在父知识库中重新运行安装器即可刷新导出内容：
-
-```bash
-cd ~/Notes/MyVault/SundayNoteAgent
-git pull --ff-only
-cd ..
-bash SundayNoteAgent/install/install.sh --vault-root .
-```
-
-安装器只部署当前 checkout，不自动执行 Git 操作。
+完整的模式范围、托管边界及可选组件见[安装说明](install/README.md)。
 
 ## 目录结构
 
@@ -85,7 +37,7 @@ bash SundayNoteAgent/install/install.sh --vault-root .
 | 路径 | 角色 | 默认维护边界 |
 |---|---|---|
 | `首页.md` | 知识库导航入口 | 由父 vault 维护 |
-| `个人上下文.md` | 个性化任务所需的稳定上下文 | 只在用户明确初始化或校准后更新 |
+| `个人上下文.md` | 个人模式的稳定上下文 | 只在用户明确初始化或校准后更新 |
 | `.import_files/` | PDF、docx、网页导出、解析产物和临时日志 | 只由导入流程管理 |
 | `10_原始材料/` | 论文、书籍、课程等长期来源总结 | 默认只读 |
 | `20_每日记录/` | Daily Routine | 明确操作和目标后写入 |
@@ -93,9 +45,9 @@ bash SundayNoteAgent/install/install.sh --vault-root .
 | `22_每月记录/` | Monthly Routine | 明确操作和目标后写入 |
 | `23_项目复盘/` | Project Routine | 明确操作和目标后写入 |
 | `30_知识库/` | agent 可维护的长期 Wiki | 按 skills 和根规则维护 |
-| `40_个人写作/` | 可选 Journal | 仅用户明确要求时读写 |
+| `40_个人写作/` | 个人模式的 Journal | 仅用户明确要求时读写 |
 | `assets/工作/figures/`、`assets/个人/figures/` | 按来源归属的长期图像 | 个人可引用工作，文档使用相对路径 |
-| `个人模板/` | 父 vault 本地模板 | 个人内容不回写工具仓库 |
+| `个人模板/` 或 `工作模板/` | 按安装模式部署的 Routine 模板 | 本地内容不回写工具仓库 |
 | `SundayNoteAgent/` | 可公开的工具层源码 | 由 Git 和安装器维护 |
 | `.agents/` | 安装后的 agent skills | 由安装器托管 |
 | `.sunday-note-agent/` | 可选 Monitor 运行副本 | 由对应安装流程维护 |

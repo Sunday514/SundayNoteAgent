@@ -1,6 +1,66 @@
 # Sunday Note 安装器
 
-本目录用于把 SundayNoteAgent 安装到私人 Obsidian vault。
+在 vault 根目录保留 `SundayNoteAgent/` 源码目录，首次安装选择模式：
+
+```bash
+bash SundayNoteAgent/install/install.sh --vault-root . --mode personal
+# 独立工作知识库
+bash SundayNoteAgent/install/install.sh --vault-root . --mode work
+```
+
+## 两种模式
+
+| 内容 | personal（默认） | work |
+| --- | --- | --- |
+| Raw、日/周/月记录、项目复盘 | `工作/` 与 `个人/` 分区 | 仅 `工作/` |
+| 长期图像 | `assets/工作/figures/`、`assets/个人/figures/` | 仅 `assets/工作/figures/` |
+| Wiki | `30_知识库/`，按主题统一组织 | 同左 |
+| Routine 模板 | `个人模板/`，含日记入口、周/月统计 | `工作模板/`，计划、记录、周/月总结 |
+| 个性化 | context Skill、缺失时创建个人上下文 | 不安装 context Skill、不创建个人上下文 |
+| 写作 | 创建 `40_个人写作/` | 不创建 |
+| QuickAdd | 每日记录、日记、周/月统计 | 仅创建工作每日记录 |
+| Daily Notes / Calendar | 个人日/周记录目录及模板 | 工作日/周记录目录及模板 |
+
+两种模式都创建 `.import_files/`、首页和同步忽略规则，并部署 Ingest、Query、Lint。工作模式的原始材料位于 `10_原始材料/工作/`，项目位于 `23_项目复盘/工作/`。月记录由 Agent 或 Obsidian 模板创建。
+
+模式保存在 vault 本地 `.sunday-note-agent/install-mode`，更新时可省略 `--mode`；没有记录的旧安装默认为个人模式。显式指定模式只改变本次托管配置和之后的安装范围，不删除或迁移已有笔记、模板、首页和额外 Skill。需要纯工作环境时使用独立 vault；已有 `AGENTS.md` 个性化响应段会阻止工作模式安装，以免覆盖或混入个人指令。
+
+## 更新与选项
+
+关闭 Obsidian，更新源码并重新安装，完成后再打开 Obsidian：
+
+```bash
+git -C SundayNoteAgent pull --ff-only
+bash SundayNoteAgent/install/install.sh --vault-root .
+```
+
+| 选项 | 行为 |
+| --- | --- |
+| `--routine-templates managed`（默认） | 创建缺失的 Daily 模板，刷新 Weekly/Monthly 模板；合并已启用 Daily Notes、Calendar 的目录和模板字段 |
+| `--routine-templates preserve` | 不创建或更新模板，保留 Daily Notes、Calendar 设置；QuickAdd 仍按安装模式更新 |
+| `--with-paper-summarizer` | 首次安装论文总结 Skill；已安装后普通更新继续刷新 |
+| `--with-monitor` | 安装或更新 Monitor，包括用户级 Hook/MCP 配置 |
+| `--with-monitor --monitor-only` | 只更新 Monitor，不改变 vault 安装模式、模板和其他工具 |
+| `--without-monitor --monitor-only` | 卸载 Monitor 托管入口，保留日志 |
+
+先自行安装并启用需要的 Obsidian 插件。插件缺失时核心安装仍完成，并报告跳过的集成。保留模板时，QuickAdd 创建每日记录仍要求当前模式的固定路径下已有模板。论文总结依赖 Docling，当前 Python 不可用时按 Skill 使用 `conda run -n papers python`。
+
+## 托管边界
+
+- 根规则由公共 scaffold 与模式规则组合生成；个人模式保留唯一末尾 `## 个性化响应` 章节，重复标题时停止覆盖。
+- Skills 从源码复制，额外文件保留；工作模式根规则限制只使用工作来源和 Wiki。
+- 首页、Daily 模板、个人上下文和 `.gitignore` 只在缺失时创建；Weekly/Monthly 按所选模板模式更新。已有正文不迁移。
+- QuickAdd 按稳定 ID/名称替换本项目入口，工作模式移除本项目的个人日记和统计入口；用户自有 choices 与其他配置保留。安装器不启用插件。
+- `.stignore` 文件开头的托管段按模式刷新，用户规则保留在后；源码、凭据、日志、导入中间产物和设备状态留在本地。工作模式另外排除所有固定层的 `个人/` 分区、`assets/个人/`、`40_个人写作/`、`个人模板/` 和 `个人上下文.md`；个人模式允许工作与个人内容同步。托管排除优先于用户的包含规则，切换模式只替换托管段。
+- 个人模式需要个性化时，可显式调用 `$sunday-note-context` 初始化；安装器不启动访谈。
+
+个人周/月统计仅修改已有记录的自动块；打卡项读取 Daily 模板。周统计覆盖 ISO 周的 7 天，月统计汇总周日落在该月的完整周。工作模式不部署这些入口。
+
+Syncthing 的 `.stignore` 是设备本地文件，各设备需按自身模式安装。排除规则不删除此前已同步的文件；若要求设备从未接收个人资料，应先安装工作模式再启用同步。语法及首条匹配规则见 [Syncthing 官方说明](https://docs.syncthing.net/users/ignoring.html)。
+
+## 验证
+
+在工具仓库运行 `bash tests/run.sh`。测试使用脱敏临时 vault，覆盖两种模式、重复安装、模板保留、插件配置和导出脚本，不读取真实 vault。
 
 ## Monitor（可选）
 
@@ -86,126 +146,3 @@ Monitor 默认使用 `gpt-6-luna` / `xhigh`，整轮硬上限 10 分钟，预留
 摘要检查点与专项报告只写 scratch，宿主校验后保存。失败或超时保留有效部分及未覆盖范围，没有最终汇总时不推送；下一轮复核。目标及证据变化时暂存，避免旧版本结论直接投递；同版本已完成 Review 可复用。父任务用量与子任务用量分开记录，不可观察时为未知，不把父用量当总量。旧建议安装时一次性转为单发现报告，保留 ID、证据、用户选择和处理状态；旧待发内容仍须复核。
 
 优先检查直接涉及材料及真实关联来源，疑问已解决即停止，不为凑建议重跑主任务。需要核对其他代码仓库时，可在本地 `.logs/codex/config.json` 的 `reference_roots` 数组中列出明确目录；它只限定检索指导和可接受的文件证据，不是操作系统级读取隔离。不要填用户主目录或文件系统根目录。未配置时仅接受当前项目和 Vault 的文件引用，引用必须是连续原文。
-
-同一脚本同时用于首次安装和更新：补建缺失的 vault 骨架和本地基线文件，并用当前 checkout 覆盖安装器托管内容。它不移动、重命名或整理已有个人内容，也不自动执行 Git 操作。
-
-安装器设置工具入口和本地默认配置：
-
-```text
-.agents/skills/sunday-note-ingest                  # 安装器托管副本
-.agents/skills/sunday-note-lint                    # 安装器托管副本
-.agents/skills/sunday-note-query                   # 安装器托管副本
-.agents/skills/sunday-note-context                 # 安装器托管副本
-.agents/skills/paper-summarizer                    # 安装器托管副本，可选
-.obsidian/daily-notes.json                        # 已启用时合并个人目录和模板
-.obsidian/plugins/calendar/data.json               # 已预装启用时合并项目字段
-.obsidian/plugins/quickadd/data.json               # 已预装启用时合并项目 choices
-```
-
-## 使用
-
-先在 Obsidian 中安装并启用需要的 Calendar、QuickAdd，然后关闭 Obsidian。运行安装器并看到完成提示后再启动 Obsidian，确保插件从更新后的 `data.json` 加载配置。
-
-在知识库根目录拉下本项目，然后运行安装：
-
-```bash
-cd ~/Notes/Sunday-note
-git clone git@github.com:Sunday514/SundayNoteAgent.git SundayNoteAgent
-bash SundayNoteAgent/install/install.sh
-```
-
-本地验证或使用 fork 时：
-
-```bash
-mkdir -p /tmp/Sunday-note-test
-cd /tmp/Sunday-note-test
-git clone /path/to/SundayNoteAgent SundayNoteAgent
-bash SundayNoteAgent/install/install.sh
-```
-
-如果已经在已有 vault 的 `SundayNoteAgent/` 目录下，可以在外部 vault 根目录运行：
-
-```bash
-bash SundayNoteAgent/install/install.sh --vault-root .
-```
-
-论文总结是可选组件，依赖可运行 Docling 的 Python 环境。需要启用时增加参数：
-
-```bash
-bash SundayNoteAgent/install/install.sh --vault-root . --with-paper-summarizer
-```
-
-当前 Python 缺少 Docling 时，Skill 已长期授权使用 `conda run -n papers python`，无需确认；两者均不可用则停止。
-
-已有自己的 Routine 模板和 Calendar 创建规则时，使用保留模式：
-
-```bash
-bash SundayNoteAgent/install/install.sh --vault-root . --routine-templates preserve
-```
-
-`--routine-templates managed` 是默认值：部署 Daily、Weekly、Monthly 模板并维护 Daily Notes 和 Calendar 字段。`preserve` 不读取、创建或刷新这些模板，也不修改 Daily Notes 或 Calendar 配置；其他核心安装与 QuickAdd 可选集成照常执行。
-
-## 生成内容
-
-安装器会创建缺失的：
-
-- `AGENTS.md`：安装后的私人 vault 根规则。
-- `首页.md`：vault 首页。
-- `.import_files/`：隐藏导入工作目录。
-- `10_原始材料/`、`20_每日记录/`、`21_每周记录/`、`22_每月记录/`、`23_项目复盘/`、`30_知识库/`、`40_个人写作/`、`个人模板/`。
-- `个人模板/每日记录.md`：无具体打卡项的最小 Routine 骨架，只在缺失时创建。
-- `个人模板/每周记录.md`、`每月记录.md`：包含统计刷新链接的 Weekly 和 Monthly 骨架，每次安装刷新。
-- `个人上下文.md`：按兴趣与经验、价值取舍、证据与知识演化、判断与协作、表达偏好组织的根目录空页面。
-- `.stignore`：由 scaffold 提供文档同步基线，已有文件仅补充缺失规则；排除工具源码/副本、Git、凭据、设备状态、日志、导入中间产物、临时文件、垃圾箱和 Obsidian 索引缓存。
-- `SundayNoteAgent/` 工具层目录。
-
-其中 `.import_files/` 是 PDF、docx、网页导出和解析中间产物的临时导入目录；`40_个人写作/` 只是空目录骨架，安装器不定义其中内容，也不维护其内部结构。
-
-四个核心 Skills、固定分层目录和最小 Routine 模板不依赖社区插件。Calendar、QuickAdd 缺失或未启用时，核心安装照常完成，安装结果会明确列出未配置的可选工作流。
-
-不论是新 vault 还是已有 vault，安装器都会补建缺失的标准目录和各内容层的工作/个人分区，以及 `.import_files/`；不迁移已有内容。工具入口的维护方式是：
-
-- 每次刷新父 vault 的 `AGENTS.md` 托管规则和四个基础 skill；`managed` 模式同时刷新 Weekly 和 Monthly 模板。
-- 传入 `--with-paper-summarizer` 时首次导出 `paper-summarizer`；已导出时，普通重跑也会刷新它。
-- 托管目录中不与源仓库同名的额外文件会保留。
-- 已安装并启用 Calendar 且模板模式为 `managed` 时，维护 `showWeeklyNote`、`weeklyNoteFormat`、`weeklyNoteTemplate`、`weeklyNoteFolder`；`preserve` 模式保持 Calendar 配置不变。
-- 已安装并启用 QuickAdd 时，维护每日记录、日记创建和周/月统计四个 choices。
-- 已启用 Daily Notes 且使用托管模板时，维护个人 Daily 目录、日期格式和模板；其他插件字段、其他 choices 和插件启用列表保持不变。
-- 父 vault `.stignore` 保留已有内容，每次安装补充 scaffold 中缺失的忽略规则。保留正文、附件、个人模板、最终输出、可迁移 Obsidian 设置和文档冲突文件。
-
-根目录 `个人上下文.md` 缺失时创建空 scaffold，已有文件保留。根 `AGENTS.md` 以唯一末尾章节 `## 个性化响应` 保留个人响应段，兼容 LF 和 CRLF 标题；无该章节时部署托管根规则，标题重复时停止覆盖。段内换行保留，缺少末尾换行时补换行。
-
-安装完成后建议用户主动要求 agent“初始化个人上下文”，或显式调用 `$sunday-note-context`。该流程逐题询问缺失信息，整个访谈最多追加两题澄清，再生成完整个人上下文、个性化响应 prompt 和入口链接；两份完整草案经一次明确确认后写入。根规则不预留该段，安装器也不自动触发或提醒该流程。
-
-项目模板只保存稳定结构和自动块标记，不包含具体打卡类别或个人正文。Daily 模板只在缺失时创建，Weekly 和 Monthly 模板由安装器刷新；薄脚本使用固定的个人 Routine 与模板路径。论文总结导入工作目录为 `.import_files`，默认摘要目录为 `10_原始材料/工作/论文总结`，个人论文通过 `--scope 个人` 指定。
-
-## 知识流
-
-- Ingest 按用户授权导入资料、更新项目、整理 Routine 和修复链接，再按实际知识增量更新 Wiki。工作来源与个人来源分区，Wiki 保持统一。
-- Query 搜索 Wiki，并在个性化任务需要时读取根目录个人上下文；Wiki 证据不足时，只沿页面中的直接链接按需读取 Raw / Routine。
-- Lint 仅在用户显式调用 `$sunday-note-lint` 时触发，逐页检查整个 Wiki，并用 `lint_headers.py` 和 `audit_reachability.py` 建立机械基线。默认按唯一全局计划委派 Wiki 维护，子任务继承已授权范围；只读请求只报告。默认展示范围和结果摘要，完整任务明细按需展开，阻塞、失败和未完成事项必须报告。
-
-安装器始终覆盖四个核心 skill；`managed` 模式覆盖 Weekly 和 Monthly 模板，`preserve` 模式不触碰任何 Routine 模板。父 vault 的 Daily 模板、个人上下文和其他知识内容不进入托管覆盖范围。
-
-普通 Routine 改写及 Ingest 多页写入，用户已明确操作和全部目标时直接执行；新增目标或操作再确认。删除、归档、未确认结论和个人上下文草案继续遵守 Skill 的专门确认规则。
-
-根规则集中维护公共表达要求，各 Skill 保留产物约定。论文总结保持三个主章节和证据校验，小节随实际方法组织。
-
-## 验证
-
-在工具仓库根目录运行：
-
-```bash
-bash tests/run.sh
-```
-
-该命令使用临时 vault 验证首次安装、托管文件更新、重复安装、核心 skill 导出和安装后脚本运行，不读取实际父 vault。
-
-## 可选 Obsidian 集成
-
-- Calendar 的 Weekly 格式为 `gggg-[W]ww`，创建目录为 `21_每周记录/个人`，模板为 `个人模板/每周记录.md`。
-- QuickAdd 提供每日记录、日记创建和周/月统计四个入口；已有每日记录或日记只打开、不覆盖。
-- `automation/quickadd/rollup.js` 只更新已有个人周/月记录的统计块，不创建记录、不生成分析。打卡项读取个人 Daily 模板。
-- 周统计读取对应 ISO 周的 7 天；月统计汇总周日落在该月的完整 ISO 周。缺失打卡项不计入分母，缺失文件显示为纯文本。
-- Agent 负责工作记录导入、项目更新、周/月整理和链接维护；周记录可由 Calendar 创建，月记录由 Agent 或原生模板创建。
-- 如果你需要隐藏运行产物目录，可选安装并启用 `OA-file-hider`（不作为安装器硬依赖）。

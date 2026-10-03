@@ -152,11 +152,26 @@ async function testDailyAndDiary() {
   assert.equal(fixture.files.get(diary), "日记正文");
 }
 
+async function testWorkDaily() {
+  const fixture = makeApp({ "工作模板/每日记录.md": repoText("templates/work/每日记录.md") });
+  const params = { app: fixture.app, variables: { date: "2026-07-13" } };
+  await createDaily(params, { mode: "work" });
+  const pathname = "20_每日记录/工作/2026-07-13.md";
+  const content = fixture.files.get(pathname);
+  assert.match(content, /2026-W29/);
+  assert.doesNotMatch(content, /个人|日记|打卡|\{\{/);
+  assert.ok([...fixture.files.keys()].every((name) => !name.includes("个人")));
+  fixture.files.set(pathname, "工作记录正文");
+  await createDaily(params, { mode: "work" });
+  assert.equal(fixture.files.get(pathname), "工作记录正文");
+}
+
 (async () => {
   await testWeekly();
   await testMonth();
   await testNoCreationOrOverwrite();
   await testDailyAndDiary();
+  await testWorkDaily();
   console.log("routine fixture passed");
 })().catch((error) => {
   console.error(error);

@@ -37,18 +37,20 @@ def plugin_data_path(vault_root: Path, plugin_id: str) -> Path:
     return target
 
 
-def configure_calendar(vault_root: Path, config_root: Path, enabled: set[str]) -> None:
+def configure_calendar(vault_root: Path, config_root: Path, enabled: set[str], mode: str = "personal") -> None:
     if not plugin_is_ready(vault_root, enabled, "calendar"):
         print("可选工作流未配置：Calendar Weekly 创建（插件未安装并启用）。")
         return
     target = plugin_data_path(vault_root, "calendar")
     current = load_json(target) if target.exists() else {}
     current.update(load_json(config_root / "calendar.json"))
+    if mode == "work":
+        current.update(weeklyNoteFolder="21_每周记录/工作", weeklyNoteTemplate="工作模板/每周记录.md")
     write_json(target, current)
     print("已配置可选工作流：Calendar Weekly 创建。")
 
 
-def configure_quickadd(vault_root: Path, config_root: Path, enabled: set[str]) -> None:
+def configure_quickadd(vault_root: Path, config_root: Path, enabled: set[str], mode: str = "personal") -> None:
     if not plugin_is_ready(vault_root, enabled, "quickadd"):
         print("可选工作流未配置：QuickAdd Routine 自动化（插件未安装并启用）。")
         return
@@ -57,6 +59,9 @@ def configure_quickadd(vault_root: Path, config_root: Path, enabled: set[str]) -
     desired_choices = load_json(config_root / "quickadd.json")["choices"]
     owned_ids = {choice["id"] for choice in desired_choices}
     owned_names = {choice["name"] for choice in desired_choices}
+    if mode == "work":
+        desired_choices = [choice for choice in desired_choices if choice["id"] == "sunday-note-create-daily"]
+        desired_choices[0]["macro"]["commands"][0]["settings"] = {"mode": "work"}
     current["choices"] = [
         choice
         for choice in current.get("choices", [])
@@ -66,7 +71,7 @@ def configure_quickadd(vault_root: Path, config_root: Path, enabled: set[str]) -
     print("已配置可选工作流：QuickAdd Routine 自动化。")
 
 
-def configure_daily_notes(vault_root: Path, config_root: Path) -> None:
+def configure_daily_notes(vault_root: Path, config_root: Path, mode: str = "personal") -> None:
     core_path = vault_root / ".obsidian" / "core-plugins.json"
     if not core_path.exists() or not load_json(core_path).get("daily-notes", False):
         return
@@ -75,13 +80,16 @@ def configure_daily_notes(vault_root: Path, config_root: Path) -> None:
         raise RuntimeError(f"拒绝写入符号链接：{target}")
     current = load_json(target) if target.exists() else {}
     current.update(load_json(config_root / "daily-notes.json"))
+    if mode == "work":
+        current.update(folder="20_每日记录/工作", template="工作模板/每日记录.md")
     write_json(target, current)
-    print("已配置 Daily Notes 个人记录目录和模板。")
+    print("已配置 Daily Notes 记录目录和模板。")
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--vault-root", type=Path, required=True)
+    parser.add_argument("--mode", choices=("personal", "work"), default="personal")
     parser.add_argument(
         "--preserve-templates",
         action="store_true",
@@ -93,9 +101,9 @@ def main() -> int:
     enabled_path = args.vault_root / ".obsidian" / "community-plugins.json"
     enabled = set(load_json(enabled_path)) if enabled_path.is_file() else set()
     if not args.preserve_templates:
-        configure_daily_notes(args.vault_root, config_root)
-        configure_calendar(args.vault_root, config_root, enabled)
-    configure_quickadd(args.vault_root, config_root, enabled)
+        configure_daily_notes(args.vault_root, config_root, args.mode)
+        configure_calendar(args.vault_root, config_root, enabled, args.mode)
+    configure_quickadd(args.vault_root, config_root, enabled, args.mode)
     return 0
 
 

@@ -3,6 +3,7 @@ set -euo pipefail
 
 PROJECT_DIR_NAME="SundayNoteAgent"
 VAULT_ROOT=""
+INSTALL_MODE=""
 WITH_PAPER_SUMMARIZER=0
 MONITOR_MODE=""
 MONITOR_ONLY=0
@@ -25,6 +26,7 @@ Usage:
   install.sh
   install.sh --vault-root <vault-dir>
   install.sh [--vault-root <vault-dir>] [--with-paper-summarizer]
+             [--mode personal|work]
              [--routine-templates managed|preserve]
   install.sh --vault-root <vault-dir> --with-monitor [--monitor-only]
   install.sh --vault-root <vault-dir> --without-monitor --monitor-only
@@ -33,6 +35,8 @@ Install or update SundayNoteAgent-managed files from the current checkout.
 Without --vault-root, the vault root is the parent of SundayNoteAgent/.
 The installer creates missing vault-local files and refreshes only managed files and plugin fields.
 Paper summarizer is optional because it requires a docling-capable environment.
+Mode defaults to personal on first install and is remembered for updates.
+Work mode creates only work partitions, work templates and work entry points.
 Routine templates default to managed. Use preserve to leave existing templates
 and Calendar template settings unchanged without creating new template files.
 USAGE
@@ -40,6 +44,11 @@ USAGE
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
+    --mode)
+      [ "$#" -ge 2 ] || { echo "missing value for --mode" >&2; exit 2; }
+      case "$2" in personal|work) INSTALL_MODE="$2" ;; *) echo "invalid mode: $2" >&2; exit 2 ;; esac
+      shift 2
+      ;;
     --vault-root)
       [ "$#" -ge 2 ] || { echo "missing value for --vault-root" >&2; exit 2; }
       VAULT_ROOT="$2"
@@ -115,6 +124,21 @@ if [ "$MONITOR_ONLY" -eq 1 ]; then
   [ -n "$MONITOR_MODE" ] || { echo "--monitor-only requires --with-monitor or --without-monitor" >&2; exit 2; }
   configure_monitor
   exit 0
+fi
+
+mode_file="$VAULT_ROOT/.sunday-note-agent/install-mode"
+if [ -z "$INSTALL_MODE" ]; then
+  if [ -f "$mode_file" ]; then INSTALL_MODE="$(< "$mode_file")"; else INSTALL_MODE=personal; fi
+fi
+case "$INSTALL_MODE" in personal|work) ;; *) echo "invalid saved install mode: $INSTALL_MODE" >&2; exit 2 ;; esac
+TEMPLATE_DIR=个人模板
+TEMPLATE_SOURCE="$SOURCE_ROOT/templates"
+CORE_SKILLS=(sunday-note-ingest sunday-note-lint sunday-note-query)
+if [ "$INSTALL_MODE" = work ]; then
+  TEMPLATE_DIR=工作模板
+  TEMPLATE_SOURCE="$SOURCE_ROOT/templates/work"
+else
+  CORE_SKILLS+=(sunday-note-context)
 fi
 
 require_source_file() {
@@ -240,9 +264,15 @@ prepare_managed_agents() {
       return 1
     fi
   fi
+  if [ "$INSTALL_MODE" = work ] && [ "$has_personal_context" -eq 1 ]; then
+    echo "工作模式不能合并现有个性化响应段；请使用独立工作 vault。" >&2
+    return 1
+  fi
 
   RENDERED_AGENTS="$(mktemp)"
   cp -p "$template" "$RENDERED_AGENTS"
+  printf '\n' >> "$RENDERED_AGENTS"
+  cat "$SCAFFOLD_DIR/$INSTALL_MODE.md" >> "$RENDERED_AGENTS"
   if [ "$has_personal_context" -eq 1 ]; then
     if [ -s "$RENDERED_AGENTS" ] && [ -n "$(tail -c 1 "$RENDERED_AGENTS")" ]; then
       printf '\n' >> "$RENDERED_AGENTS"
@@ -260,40 +290,25 @@ prepare_managed_agents() {
 }
 
 ensure_vault_dirs() {
-  mkdir -p \
-    "$VAULT_ROOT/.agents" \
-    "$VAULT_ROOT/.import_files" \
-    "$VAULT_ROOT/10_原始材料" \
-    "$VAULT_ROOT/20_每日记录" \
-    "$VAULT_ROOT/21_每周记录" \
-    "$VAULT_ROOT/22_每月记录" \
-    "$VAULT_ROOT/23_项目复盘" \
-    "$VAULT_ROOT/30_知识库" \
-    "$VAULT_ROOT/40_个人写作" \
-    "$VAULT_ROOT/个人模板" \
-    "$VAULT_ROOT/assets/工作/figures" \
-    "$VAULT_ROOT/assets/个人/figures"
-
-  local layer scope
+  local layer scope directory
+  local scopes=(工作)
+  local directories=(.import_files 30_知识库)
+  if [ "$INSTALL_MODE" = personal ]; then
+    scopes+=(个人)
+    directories+=(40_个人写作)
+  fi
+  if [ "$ROUTINE_TEMPLATES_MODE" = managed ]; then directories+=("$TEMPLATE_DIR"); fi
   for layer in 10_原始材料 20_每日记录 21_每周记录 22_每月记录 23_项目复盘; do
-    for scope in 工作 个人; do
-      mkdir -p "$VAULT_ROOT/$layer/$scope"
-      touch "$VAULT_ROOT/$layer/$scope/.gitkeep"
+    directories+=("$layer")
+    for scope in "${scopes[@]}"; do
+      directories+=("$layer/$scope")
     done
   done
-
-  touch \
-    "$VAULT_ROOT/.import_files/.gitkeep" \
-    "$VAULT_ROOT/10_原始材料/.gitkeep" \
-    "$VAULT_ROOT/20_每日记录/.gitkeep" \
-    "$VAULT_ROOT/21_每周记录/.gitkeep" \
-    "$VAULT_ROOT/22_每月记录/.gitkeep" \
-    "$VAULT_ROOT/23_项目复盘/.gitkeep" \
-    "$VAULT_ROOT/30_知识库/.gitkeep" \
-    "$VAULT_ROOT/40_个人写作/.gitkeep" \
-    "$VAULT_ROOT/个人模板/.gitkeep" \
-    "$VAULT_ROOT/assets/工作/figures/.gitkeep" \
-    "$VAULT_ROOT/assets/个人/figures/.gitkeep"
+  for scope in "${scopes[@]}"; do directories+=("assets/$scope/figures"); done
+  for directory in "${directories[@]}"; do
+    mkdir -p "$VAULT_ROOT/$directory"
+    touch "$VAULT_ROOT/$directory/.gitkeep"
+  done
 }
 
 ensure_personal_context_file() {
@@ -308,19 +323,38 @@ ensure_personal_context_file() {
 
 ensure_syncthing_ignores() {
   local target="$VAULT_ROOT/.stignore"
-  local pattern
-
-  copy_if_missing "$SCAFFOLD_DIR/.stignore" "$target"
-  while IFS= read -r pattern || [ -n "$pattern" ]; do
-    case "$pattern" in ''|\#*) continue ;; esac
-    if [ -f "$target" ] && grep -Fxq -- "$pattern" "$target"; then
-      continue
-    fi
-    if [ -s "$target" ] && [ -n "$(tail -c 1 "$target")" ]; then
-      printf '\n' >> "$target"
-    fi
-    printf '%s\n' "$pattern" >> "$target"
-  done < "$SCAFFOLD_DIR/.stignore"
+  local begin='// BEGIN SundayNoteAgent managed ignores'
+  local end='// END SundayNoteAgent managed ignores'
+  local line inside=0 blocks=0 rendered
+  rendered="$(mktemp)"
+  printf '%s\n' "$begin" > "$rendered"
+  cat "$SCAFFOLD_DIR/.stignore" >> "$rendered"
+  if [ "$INSTALL_MODE" = work ]; then cat "$SCAFFOLD_DIR/work.stignore" >> "$rendered"; fi
+  printf '%s\n' "$end" >> "$rendered"
+  if [ -f "$target" ]; then
+    while IFS= read -r line || [ -n "$line" ]; do
+      if [ "${line%$'\r'}" = "$begin" ]; then
+        blocks=$((blocks + 1))
+        if [ "$inside" -eq 1 ] || [ "$blocks" -gt 1 ]; then break; fi
+        inside=1
+      elif [ "${line%$'\r'}" = "$end" ]; then
+        if [ "$inside" -eq 0 ]; then blocks=2; break; fi
+        inside=0
+      elif [ "$inside" -eq 0 ]; then
+        # 接管旧安装追加的公共规则，其余用户规则保持顺序和内容。
+        if ! grep -Fxq -- "${line%$'\r'}" "$SCAFFOLD_DIR/.stignore"; then
+          printf '%s\n' "$line" >> "$rendered"
+        fi
+      fi
+    done < "$target"
+  fi
+  if [ "$inside" -eq 1 ] || [ "$blocks" -gt 1 ]; then
+    rm -f -- "$rendered"
+    echo "无效的 .stignore 托管段：$target" >&2
+    return 1
+  fi
+  copy_managed_file "$rendered" "$target"
+  rm -f -- "$rendered"
 }
 
 paper_skill_path="$VAULT_ROOT/.agents/skills/paper-summarizer"
@@ -330,24 +364,24 @@ if [ "$WITH_PAPER_SUMMARIZER" -eq 1 ] || [ -e "$paper_skill_path" ] || [ -L "$pa
 fi
 
 require_source_file "$SCAFFOLD_DIR/AGENTS.md"
+require_source_file "$SCAFFOLD_DIR/$INSTALL_MODE.md"
+if [ "$INSTALL_MODE" = work ]; then require_source_file "$SCAFFOLD_DIR/work-home.md"; fi
 require_source_file "$SCAFFOLD_DIR/首页.md"
 require_source_file "$SCAFFOLD_DIR/.gitignore"
 require_source_file "$SCAFFOLD_DIR/.stignore"
+if [ "$INSTALL_MODE" = work ]; then require_source_file "$SCAFFOLD_DIR/work.stignore"; fi
 require_source_file "$SOURCE_ROOT/config/obsidian/calendar.json"
 require_source_file "$SOURCE_ROOT/config/obsidian/daily-notes.json"
 require_source_file "$SOURCE_ROOT/config/obsidian/quickadd.json"
 require_source_file "$SCRIPT_DIR/configure_optional_integrations.py"
 if [ "$ROUTINE_TEMPLATES_MODE" = managed ]; then
-  require_source_file "$SOURCE_ROOT/templates/每日记录.md"
-  require_source_file "$SOURCE_ROOT/templates/每周记录.md"
-  require_source_file "$SOURCE_ROOT/templates/每月记录.md"
+  for name in 每日记录 每周记录 每月记录; do require_source_file "$TEMPLATE_SOURCE/$name.md"; done
 fi
 require_source_dir "$SOURCE_ROOT/automation/quickadd"
-require_source_dir "$SOURCE_ROOT/skills/sunday-note-context"
-require_source_file "$SOURCE_ROOT/skills/sunday-note-context/assets/个人上下文.md"
-require_source_dir "$SOURCE_ROOT/skills/sunday-note-ingest"
-require_source_dir "$SOURCE_ROOT/skills/sunday-note-lint"
-require_source_dir "$SOURCE_ROOT/skills/sunday-note-query"
+for skill in "${CORE_SKILLS[@]}"; do require_source_dir "$SOURCE_ROOT/skills/$skill"; done
+if [ "$INSTALL_MODE" = personal ]; then
+  require_source_file "$SOURCE_ROOT/skills/sunday-note-context/assets/个人上下文.md"
+fi
 if [ "$install_paper_summarizer" -eq 1 ]; then
   require_source_dir "$SOURCE_ROOT/skills/paper-summarizer"
 fi
@@ -365,22 +399,22 @@ fi
 
 preflight_container_dir "$VAULT_ROOT/.agents"
 preflight_container_dir "$VAULT_ROOT/.agents/skills"
+preflight_container_dir "$VAULT_ROOT/.sunday-note-agent"
+preflight_managed_file "$mode_file"
 
 preflight_managed_file "$VAULT_ROOT/AGENTS.md"
 preflight_local_file "$VAULT_ROOT/首页.md"
 preflight_local_file "$VAULT_ROOT/.gitignore"
 preflight_append_file "$VAULT_ROOT/.stignore"
-preflight_local_file "$VAULT_ROOT/个人上下文.md"
+if [ "$INSTALL_MODE" = personal ]; then preflight_local_file "$VAULT_ROOT/个人上下文.md"; fi
 if [ "$ROUTINE_TEMPLATES_MODE" = managed ]; then
-  preflight_local_file "$VAULT_ROOT/个人模板/每日记录.md"
-  preflight_managed_file "$VAULT_ROOT/个人模板/每周记录.md"
-  preflight_managed_file "$VAULT_ROOT/个人模板/每月记录.md"
+  preflight_container_dir "$VAULT_ROOT/$TEMPLATE_DIR"
+  preflight_local_file "$VAULT_ROOT/$TEMPLATE_DIR/每日记录.md"
+  preflight_managed_file "$VAULT_ROOT/$TEMPLATE_DIR/每周记录.md"
+  preflight_managed_file "$VAULT_ROOT/$TEMPLATE_DIR/每月记录.md"
 fi
 
-preflight_managed_dir "$VAULT_ROOT/.agents/skills/sunday-note-ingest"
-preflight_managed_dir "$VAULT_ROOT/.agents/skills/sunday-note-lint"
-preflight_managed_dir "$VAULT_ROOT/.agents/skills/sunday-note-query"
-preflight_managed_dir "$VAULT_ROOT/.agents/skills/sunday-note-context"
+for skill in "${CORE_SKILLS[@]}"; do preflight_managed_dir "$VAULT_ROOT/.agents/skills/$skill"; done
 if [ "$install_paper_summarizer" -eq 1 ]; then
   preflight_managed_dir "$paper_skill_path"
 fi
@@ -388,22 +422,25 @@ prepare_managed_agents
 
 ensure_vault_dirs
 copy_managed_file "$RENDERED_AGENTS" "$VAULT_ROOT/AGENTS.md"
-copy_if_missing "$SCAFFOLD_DIR/首页.md" "$VAULT_ROOT/首页.md"
+if [ "$INSTALL_MODE" = work ]; then
+  copy_if_missing "$SCAFFOLD_DIR/work-home.md" "$VAULT_ROOT/首页.md"
+else
+  copy_if_missing "$SCAFFOLD_DIR/首页.md" "$VAULT_ROOT/首页.md"
+fi
 copy_if_missing "$SCAFFOLD_DIR/.gitignore" "$VAULT_ROOT/.gitignore"
 ensure_syncthing_ignores
 if [ "$ROUTINE_TEMPLATES_MODE" = managed ]; then
-  copy_if_missing "$SOURCE_ROOT/templates/每日记录.md" "$VAULT_ROOT/个人模板/每日记录.md"
-  copy_managed_file "$SOURCE_ROOT/templates/每周记录.md" "$VAULT_ROOT/个人模板/每周记录.md"
-  copy_managed_file "$SOURCE_ROOT/templates/每月记录.md" "$VAULT_ROOT/个人模板/每月记录.md"
+  copy_if_missing "$TEMPLATE_SOURCE/每日记录.md" "$VAULT_ROOT/$TEMPLATE_DIR/每日记录.md"
+  copy_managed_file "$TEMPLATE_SOURCE/每周记录.md" "$VAULT_ROOT/$TEMPLATE_DIR/每周记录.md"
+  copy_managed_file "$TEMPLATE_SOURCE/每月记录.md" "$VAULT_ROOT/$TEMPLATE_DIR/每月记录.md"
 else
   echo "已保留父 vault 的 Routine 模板与 Calendar 模板设置。"
 fi
-ensure_personal_context_file
+if [ "$INSTALL_MODE" = personal ]; then ensure_personal_context_file; fi
 
-copy_managed_dir "$SOURCE_ROOT/skills/sunday-note-context" "$VAULT_ROOT/.agents/skills/sunday-note-context"
-copy_managed_dir "$SOURCE_ROOT/skills/sunday-note-ingest" "$VAULT_ROOT/.agents/skills/sunday-note-ingest"
-copy_managed_dir "$SOURCE_ROOT/skills/sunday-note-lint" "$VAULT_ROOT/.agents/skills/sunday-note-lint"
-copy_managed_dir "$SOURCE_ROOT/skills/sunday-note-query" "$VAULT_ROOT/.agents/skills/sunday-note-query"
+for skill in "${CORE_SKILLS[@]}"; do
+  copy_managed_dir "$SOURCE_ROOT/skills/$skill" "$VAULT_ROOT/.agents/skills/$skill"
+done
 if [ "$install_paper_summarizer" -eq 1 ]; then
   copy_managed_dir "$SOURCE_ROOT/skills/paper-summarizer" "$paper_skill_path"
   rm -f \
@@ -412,7 +449,7 @@ if [ "$install_paper_summarizer" -eq 1 ]; then
 fi
 
 if [ -n "$OPTIONAL_CONFIG_PYTHON" ]; then
-  optional_config_args=(--vault-root "$VAULT_ROOT")
+  optional_config_args=(--vault-root "$VAULT_ROOT" --mode "$INSTALL_MODE")
   if [ "$ROUTINE_TEMPLATES_MODE" = preserve ]; then
     optional_config_args+=(--preserve-templates)
   fi
@@ -424,6 +461,9 @@ else
   echo "可选工作流未配置：QuickAdd Routine 自动化（未找到 python3 或 python；核心安装已完成）。"
 fi
 echo "Installed or updated Sunday Note vault at: $VAULT_ROOT"
+mkdir -p "$VAULT_ROOT/.sunday-note-agent"
+printf '%s\n' "$INSTALL_MODE" > "$mode_file"
+echo "安装模式：$INSTALL_MODE"
 if [ -n "$MONITOR_MODE" ]; then configure_monitor; fi
 if [ "$ROUTINE_TEMPLATES_MODE" = managed ]; then
   echo "Managed rules, skills, and Routine files were refreshed from: $PROJECT_DIR_NAME"
