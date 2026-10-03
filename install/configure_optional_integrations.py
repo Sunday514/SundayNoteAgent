@@ -66,20 +66,34 @@ def configure_quickadd(vault_root: Path, config_root: Path, enabled: set[str]) -
     print("已配置可选工作流：QuickAdd Routine 自动化。")
 
 
+def configure_daily_notes(vault_root: Path, config_root: Path) -> None:
+    core_path = vault_root / ".obsidian" / "core-plugins.json"
+    if not core_path.exists() or not load_json(core_path).get("daily-notes", False):
+        return
+    target = vault_root / ".obsidian" / "daily-notes.json"
+    if target.is_symlink():
+        raise RuntimeError(f"拒绝写入符号链接：{target}")
+    current = load_json(target) if target.exists() else {}
+    current.update(load_json(config_root / "daily-notes.json"))
+    write_json(target, current)
+    print("已配置 Daily Notes 个人记录目录和模板。")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--vault-root", type=Path, required=True)
     parser.add_argument(
-        "--skip-calendar",
+        "--preserve-templates",
         action="store_true",
-        help="Preserve Calendar configuration instead of applying managed Weekly fields",
+        help="保留 Calendar 和 Daily Notes 的模板字段",
     )
     args = parser.parse_args()
 
     config_root = Path(__file__).resolve().parent.parent / "config" / "obsidian"
     enabled_path = args.vault_root / ".obsidian" / "community-plugins.json"
     enabled = set(load_json(enabled_path)) if enabled_path.is_file() else set()
-    if not args.skip_calendar:
+    if not args.preserve_templates:
+        configure_daily_notes(args.vault_root, config_root)
         configure_calendar(args.vault_root, config_root, enabled)
     configure_quickadd(args.vault_root, config_root, enabled)
     return 0

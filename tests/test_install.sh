@@ -74,20 +74,32 @@ for required_dir in \
   30_知识库 \
   40_个人写作 \
   个人模板 \
-  assets/figures; do
+  10_原始材料/工作 \
+  10_原始材料/个人 \
+  20_每日记录/工作 \
+  20_每日记录/个人 \
+  21_每周记录/工作 \
+  21_每周记录/个人 \
+  22_每月记录/工作 \
+  22_每月记录/个人 \
+  23_项目复盘/工作 \
+  23_项目复盘/个人 \
+  assets/工作/figures \
+  assets/个人/figures; do
   test -d "$vault/$required_dir" || fail "new vault is missing fixed directory: $required_dir"
 done
 assert_file_contains "$vault/.stignore" "/SundayNoteAgent"
 assert_file_contains "$vault/.stignore" "/.import_files"
+assert_same_file "$ROOT/install/scaffold/.stignore" "$vault/.stignore"
 assert_same_file "$ROOT/install/scaffold/AGENTS.md" "$vault/AGENTS.md"
 assert_same_file "$ROOT/skills/sunday-note-context/assets/个人上下文.md" "$vault/个人上下文.md"
 
 assert_same_file "$ROOT/templates/每周记录.md" "$vault/个人模板/每周记录.md"
 assert_file_contains "$vault/个人模板/每周记录.md" "value-week={{title}}"
-assert_file_contains "$vault/个人模板/每周记录.md" "- [ ] 本周计划事项"
+assert_file_contains "$vault/个人模板/每周记录.md" "## 计划"
 assert_same_file "$ROOT/templates/每月记录.md" "$vault/个人模板/每月记录.md"
-assert_file_contains "$vault/个人模板/每月记录.md" "value-month={month}"
-assert_file_contains "$vault/个人模板/每月记录.md" "- [ ] 本月计划事项"
+assert_file_contains "$vault/个人模板/每月记录.md" "value-month={{title}}"
+assert_file_contains "$vault/个人模板/每月记录.md" "## 记录"
 assert_source_tree_exported "$ROOT/skills/sunday-note-ingest" "$vault/.agents/skills/sunday-note-ingest"
 assert_source_tree_exported "$ROOT/skills/sunday-note-lint" "$vault/.agents/skills/sunday-note-lint"
 assert_source_tree_exported "$ROOT/skills/sunday-note-query" "$vault/.agents/skills/sunday-note-query"
@@ -140,6 +152,8 @@ cat > "$integrated/.obsidian/plugins/quickadd/data.json" <<'EOF'
 }
 EOF
 
+printf '%s\n' '{"daily-notes":true}' > "$integrated/.obsidian/core-plugins.json"
+printf '%s\n' '{"autorun":true,"folder":"old-daily"}' > "$integrated/.obsidian/daily-notes.json"
 cp "$integrated/.obsidian/community-plugins.json" "$TMP_ROOT/community-plugins.before.json"
 python3_only_path="$TMP_ROOT/python3-only-bin"
 make_command_path "$python3_only_path" bash cat chmod cp dirname grep mkdir mktemp python3 rm tail touch
@@ -149,12 +163,15 @@ assert_output_contains "$integration_output" "已配置可选工作流：Calenda
 assert_output_contains "$integration_output" "已配置可选工作流：QuickAdd Routine 自动化。"
 assert_same_file "$TMP_ROOT/community-plugins.before.json" "$integrated/.obsidian/community-plugins.json"
 
+assert_file_contains "$integrated/.obsidian/daily-notes.json" '"folder": "20_每日记录/个人"'
+assert_file_contains "$integrated/.obsidian/daily-notes.json" '"autorun": true'
+test ! -e "$integrated/assets/figures" || fail "installer recreated an unpartitioned asset directory"
 calendar_data="$integrated/.obsidian/plugins/calendar/data.json"
 assert_file_contains "$calendar_data" '"weekStart": "sunday"'
 assert_file_contains "$calendar_data" '"showWeeklyNote": true'
 assert_file_contains "$calendar_data" '"weeklyNoteFormat": "gggg-[W]ww"'
 assert_file_contains "$calendar_data" '"weeklyNoteTemplate": "个人模板/每周记录.md"'
-assert_file_contains "$calendar_data" '"weeklyNoteFolder": "21_每周记录"'
+assert_file_contains "$calendar_data" '"weeklyNoteFolder": "21_每周记录/个人"'
 
 quickadd_data="$integrated/.obsidian/plugins/quickadd/data.json"
 assert_file_contains "$quickadd_data" '"id": "custom-choice"'
@@ -175,7 +192,9 @@ ids = [choice.get("id") for choice in data["choices"]]
 names = [choice.get("name") for choice in data["choices"]]
 expected = {
     "sunday-note-rollup-week",
-    "sunday-note-rollup-month-pack",
+    "sunday-note-rollup-month",
+    "sunday-note-create-daily",
+    "sunday-note-create-diary",
 }
 assert all(ids.count(choice_id) == 1 for choice_id in expected)
 assert "legacy-month-choice" not in ids
@@ -214,7 +233,7 @@ cat > "$preserved/.obsidian/plugins/calendar/data.json" <<'EOF'
   "showWeeklyNote": true,
   "weeklyNoteFormat": "YYYY-[W]WW",
   "weeklyNoteTemplate": "个人模板/周记录模板.md",
-  "weeklyNoteFolder": "21_每周记录"
+  "weeklyNoteFolder": "21_每周记录/个人"
 }
 EOF
 printf '%s\n' '{"choices":[]}' > "$preserved/.obsidian/plugins/quickadd/data.json"
@@ -261,7 +280,7 @@ keywords: ["唯一集成词"]
 唯一集成词。
 
 [[10_原始材料/集成来源]]
-[[20_每日记录/2026-07-13]]
+[[20_每日记录/个人/2026-07-13]]
 EOF
 cat > "$vault/30_知识库/索引.md" <<'EOF'
 ---
@@ -277,7 +296,7 @@ keywords: ["索引"]
 [[集成测试]]
 EOF
 printf '%s\n' "# 集成来源" > "$vault/10_原始材料/集成来源.md"
-printf '%s\n' "唯一集成词只应作为直接来源读取。" > "$vault/20_每日记录/2026-07-13.md"
+printf '%s\n' "唯一集成词只应作为直接来源读取。" > "$vault/20_每日记录/个人/2026-07-13.md"
 
 query_output="$(python "$vault/.agents/skills/sunday-note-query/scripts/query_search.py" \
   "唯一集成词" --vault-root "$vault")"
@@ -301,12 +320,11 @@ audit_output="$(python "$vault/.agents/skills/sunday-note-lint/scripts/audit_rea
   --wiki-scope "30_知识库/索引.md" \
   --wiki-scope "30_知识库/集成测试.md" \
   --raw-scope "10_原始材料/集成来源.md" \
-  --routine-scope "20_每日记录/2026-07-13.md" \
+  --routine-scope "20_每日记录/个人/2026-07-13.md" \
   --format json)"
 assert_file_contains <(printf '%s' "$audit_output") '"wiki_unreachable": []'
 assert_file_contains <(printf '%s' "$audit_output") '"raw_unlinked": []'
 
-printf '%s\n' "local rollup config" > "$vault/.sunday-note-agent/config/quickadd-rollups.json"
 printf '%s\n' "local template" > "$vault/个人模板/每日记录.md"
 printf '%s\n' "stale managed rule" > "$vault/AGENTS.md"
 printf '%s\n' "personal context sentinel" >> "$vault/个人上下文.md"
@@ -316,18 +334,16 @@ printf '%s\n' "local ignore" > "$vault/.stignore"
 
 snapshot="$TMP_ROOT/local-content"
 mkdir -p "$snapshot"
-cp "$vault/.sunday-note-agent/config/quickadd-rollups.json" "$snapshot/config"
 cp "$vault/个人模板/每日记录.md" "$snapshot/template"
 cp "$vault/10_原始材料/集成来源.md" "$snapshot/raw"
-cp "$vault/20_每日记录/2026-07-13.md" "$snapshot/routine"
+cp "$vault/20_每日记录/个人/2026-07-13.md" "$snapshot/routine"
 cp "$vault/30_知识库/集成测试.md" "$snapshot/wiki"
 cp "$vault/个人上下文.md" "$snapshot/personal-context"
 
 assert_local_content_unchanged() {
-  assert_same_file "$snapshot/config" "$vault/.sunday-note-agent/config/quickadd-rollups.json"
   assert_same_file "$snapshot/template" "$vault/个人模板/每日记录.md"
   assert_same_file "$snapshot/raw" "$vault/10_原始材料/集成来源.md"
-  assert_same_file "$snapshot/routine" "$vault/20_每日记录/2026-07-13.md"
+  assert_same_file "$snapshot/routine" "$vault/20_每日记录/个人/2026-07-13.md"
   assert_same_file "$snapshot/wiki" "$vault/30_知识库/集成测试.md"
   assert_same_file "$snapshot/personal-context" "$vault/个人上下文.md"
 }
@@ -335,7 +351,6 @@ assert_local_content_unchanged() {
 bash "$ROOT/install/install.sh" --vault-root "$vault" --with-paper-summarizer >/dev/null
 
 assert_file_contains "$vault/AGENTS.md" "Agent"
-assert_file_contains "$vault/.sunday-note-agent/config/quickadd-rollups.json" "local rollup config"
 assert_file_contains "$vault/个人模板/每日记录.md" "local template"
 assert_file_contains "$vault/.agents/skills/sunday-note-query/local.md" "extra skill file"
 assert_file_contains "$vault/.stignore" "local ignore"
@@ -401,17 +416,10 @@ assert_local_content_unchanged
 assert_source_tree_exported "$ROOT/skills/paper-summarizer" "$vault/.agents/skills/paper-summarizer"
 assert_same_file "$ROOT/templates/每周记录.md" "$vault/个人模板/每周记录.md"
 assert_same_file "$ROOT/templates/每月记录.md" "$vault/个人模板/每月记录.md"
-test "$(grep -Fxc -- "/SundayNoteAgent" "$vault/.stignore")" -eq 1 || fail "Syncthing ignore rule was duplicated"
-test "$(grep -Fxc -- "/.import_files" "$vault/.stignore")" -eq 1 || fail "Syncthing import ignore rule was duplicated"
-
-conflict="$TMP_ROOT/conflict"
-mkdir -p "$conflict/SundayNoteAgent" "$conflict/.sunday-note-agent"
-printf '%s\n' "do not replace" > "$conflict/.sunday-note-agent/config"
-if bash "$ROOT/install/install.sh" --vault-root "$conflict" >"$TMP_ROOT/conflict.out" 2>&1; then
-  fail "real-file directory conflict did not stop installation"
-fi
-assert_file_contains "$TMP_ROOT/conflict.out" "$conflict/.sunday-note-agent/config"
-assert_file_contains "$conflict/.sunday-note-agent/config" "do not replace"
+while IFS= read -r pattern || [ -n "$pattern" ]; do
+  case "$pattern" in ''|\#*) continue ;; esac
+  test "$(grep -Fxc -- "$pattern" "$vault/.stignore")" -eq 1 || fail "Syncthing rule missing or duplicated: $pattern"
+done < "$ROOT/install/scaffold/.stignore"
 
 stignore_conflict="$TMP_ROOT/stignore-conflict"
 mkdir -p "$stignore_conflict/SundayNoteAgent" "$stignore_conflict/.stignore"

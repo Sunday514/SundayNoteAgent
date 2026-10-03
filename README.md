@@ -54,17 +54,16 @@ bash SundayNoteAgent/install/install.sh
 .agents/skills/sunday-note-query                   # 安装器托管副本
 .agents/skills/sunday-note-context                 # 安装器托管副本
 .agents/skills/paper-summarizer                    # 安装器托管副本，可选
-.sunday-note-agent/config/quickadd-rollups.json
-.stignore                                          # 保留已有规则并补充工具层和导入目录
+.stignore                                          # 文档同步的本地忽略规则
 个人模板/每日记录.md、每周记录.md、每月记录.md          # Routine 最小骨架
 个人上下文.md                                     # 根目录五章空页面，只在缺失时创建
 ```
 
-默认的 `--routine-templates managed` 会刷新托管的 Weekly 和 month pack 模板，并在缺失时创建 Daily 模板。`--routine-templates preserve` 不创建或刷新模板，也不修改 Calendar 的 Weekly 模板设置。两种模式都会刷新托管的根规则和 skills，并保留个人上下文与已生成的个性化响应段。论文总结 skill 首次启用时传入 `--with-paper-summarizer`；启用后普通重跑也会继续更新。当前 Python 缺少 Docling 时，Skill 已长期授权使用 `conda run -n papers python`，无需确认。
+默认的 `--routine-templates managed` 会刷新托管的 Weekly 和 Monthly 模板，并在缺失时创建 Daily 模板。`--routine-templates preserve` 不创建或刷新模板，也不修改 Calendar 与 Daily Notes 的模板设置。两种模式都会刷新托管的根规则和 skills，并保留个人上下文与已生成的个性化响应段。论文总结 skill 首次启用时传入 `--with-paper-summarizer`；启用后普通重跑也会继续更新。当前 Python 缺少 Docling 时，Skill 已长期授权使用 `conda run -n papers python`，无需确认。
 
 安装完成后可主动要求 agent“初始化个人上下文”，具体流程见[安装器说明](install/README.md)。
 
-用户先安装并启用需要的 Obsidian 插件，然后关闭 Obsidian、运行安装器，完成后再启动 Obsidian。Calendar 可用且模板模式为 `managed` 时，安装器维护 Weekly 创建格式、目录和模板字段；`preserve` 模式保留 Calendar 配置。QuickAdd 可用时，安装器维护“统计本周打卡”和“刷新每月统计”两个 Routine choice，并从可见的 `SundayNoteAgent/automation/quickadd/rollup.js` 加载脚本。其他插件字段、choices 和社区插件启用列表保持不变。缺失的可选插件不会阻断核心安装，安装结果会列出未配置的工作流。
+用户先安装并启用需要的 Obsidian 插件，然后关闭 Obsidian、运行安装器，完成后再启动 Obsidian。模板模式为 `managed` 时，安装器维护已启用 Daily Notes 的个人每日目录和模板，以及 Calendar 的个人周记录字段；`preserve` 模式保留这些设置。QuickAdd 提供每日记录、日记创建及周/月统计四个入口，脚本从 `SundayNoteAgent/automation/quickadd/` 加载。其他插件字段、choices 和社区插件启用列表保持不变。缺失的可选插件不会阻断核心安装，安装结果会列出未配置的工作流。
 
 ## 更新
 
@@ -95,21 +94,27 @@ bash SundayNoteAgent/install/install.sh --vault-root .
 | `23_项目复盘/` | Project Routine | 明确操作和目标后写入 |
 | `30_知识库/` | agent 可维护的长期 Wiki | 按 skills 和根规则维护 |
 | `40_个人写作/` | 可选 Journal | 仅用户明确要求时读写 |
-| `assets/figures/` | 长期引用图像 | 文档使用相对路径引用 |
+| `assets/工作/figures/`、`assets/个人/figures/` | 按来源归属的长期图像 | 个人可引用工作，文档使用相对路径 |
 | `个人模板/` | 父 vault 本地模板 | 个人内容不回写工具仓库 |
 | `SundayNoteAgent/` | 可公开的工具层源码 | 由 Git 和安装器维护 |
 | `.agents/` | 安装后的 agent skills | 由安装器托管 |
-| `.sunday-note-agent/` | QuickAdd 统计配置 | 缺失时由安装器创建，之后由父 vault 维护 |
+| `.sunday-note-agent/` | 可选 Monitor 运行副本 | 由对应安装流程维护 |
 | `.obsidian/` | Obsidian 插件配置和运行状态 | 仅合并已预装可选插件的项目字段 |
 
-`.import_files/` 是导入流程的临时目录，不属于知识分层。完成整理的长期来源总结进入 `10_原始材料/`，长期引用的图像进入 `assets/figures/`。
+`.import_files/` 是导入流程的临时目录，不属于知识分层。完成整理的长期来源总结进入 `10_原始材料/`，长期引用的图像进入所属范围的附件目录。
+
+Raw、Daily、Weekly、Monthly 和 Project 各层内划分 `工作/`、`个人/`；Wiki 保持统一主题分类。个人可引用工作来源，工作任务只使用工作来源与 Wiki。目录提供权限部署边界，不自行实现访问控制。
+
+Routine 统一使用“计划—记录”。Agent 负责资料导入、已有项目更新、周/月整理和链接维护。脚本只保留每日记录/日记创建，以及已有记录统计块的更新：周统计读取个人 Daily，月统计汇总周日落在该月的完整周。个人打卡项目由个人 Daily 模板定义，缺失记录或打卡项不计入分母。
+
+Syncthing 同步文档、附件、个人模板、最终输出和可迁移 Obsidian 设置；忽略 Git 元数据、工具源码及安装副本、导入中间产物、凭据、日志、设备会话、临时文件和索引缓存。文档冲突文件不统一忽略。`.stignore` 不会由 Syncthing 自动同步：每台设备通过 Git 获取工具层并运行安装器，部署本地规则和 QuickAdd 脚本。忽略规则不删除此前已同步的文件。
 
 工具仓库结构：
 
 ```text
 AGENTS.md                 # 子项目开发规则
 automation/               # QuickAdd 等自动化脚本源文件
-config/                   # QuickAdd 自动化与可选 Obsidian 集成配置
+config/                   # Obsidian 的最小集成字段
 install/                  # 安装器和父知识库 scaffold
 migration/                # 可复用知识库迁移辅助工具
 skills/                   # Codex / agent skills
@@ -118,7 +123,7 @@ tests/                    # 脱敏 fixture 和统一回归入口
 validation/               # 仅供开发使用的隔离诊断 CLI
 ```
 
-`templates/` 保存 Daily、Weekly 和 month pack 的最小结构契约；Daily 模板只在缺失时创建，Weekly 和 month pack 模板由安装器刷新。`config/obsidian/` 只保存 Calendar 和 QuickAdd 的最小项目字段，不包含插件启用列表、workspace、设备路径、环境变量、代理、sessions 或权限运行状态。
+`templates/` 保存 Daily、Weekly 和 Monthly 的最小结构契约；Daily 模板只在缺失时创建，Weekly 和 Monthly 模板由安装器刷新。`config/obsidian/` 只保存 Daily Notes、Calendar 和 QuickAdd 的最小项目字段，不包含插件启用列表、workspace、设备路径、环境变量、代理、sessions 或权限运行状态。
 
 ## Monitor（可选）
 

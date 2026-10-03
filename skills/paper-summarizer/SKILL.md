@@ -8,8 +8,8 @@ description: 用户要求精读或总结本地 PDF 论文时使用。
 ## 产物
 
 - `.import_files/<paper-slug>/`：PDF、metadata、Docling 解析、候选图像、证据和校验状态。
-- `10_原始材料/<论文标题>.md`：单篇 Raw 总结。
-- `assets/figures/<paper-slug>/`：总结实际引用的图像；其余留在导入工作区。
+- `10_原始材料/工作/论文总结/<论文标题>.md`：默认工作 Raw 总结；个人论文使用 `--scope 个人`。
+- `assets/工作/figures/<paper-slug>/`：总结实际引用的图像；个人论文使用个人附件目录，其余留在导入工作区。
 
 不直接写跨论文 Wiki 或 Project，可标记后续整合价值。
 
@@ -28,7 +28,7 @@ description: 用户要求精读或总结本地 PDF 论文时使用。
 2. 检查 `parse_dir/status.json` 的 health 和 warning，完整读取 `parsed.md`、`parsed.json` 和 `figure_index.json`。
 3. 按 `assets/summary_template.json` 写入 `summary_path`；说明问题、方法、证据和局限，方法小节按实际贡献组织。
 4. 在 `work_dir/summarize/summary_evidence.json` 写入 `{"version":1,"evidence":{"<evidence_key>":[{"page":1,"excerpt":"..."}]}}`。每个模板证据键至少一条；摘录须为对应页 `parsed.json` 实际出现的 12–300 字符文本，可选 `figure_id` 须来自同页图像索引。
-5. 最多选 2–3 张有助于理解方法或实验的图，从 `figure_source_dir` 复制到 `figures_dir`，保留文件名；使用相对 `summary_path` 的路径，默认 `../assets/figures/<paper-slug>/<文件名>`。
+5. 最多选 2–3 张有助于理解方法或实验的图，从 `figure_source_dir` 复制到 `figures_dir`，保留文件名；按实际目录计算相对 `summary_path` 的图片路径，默认宽度 640。
 6. 校验证据、metadata、结构和图像，并更新状态：
 
 ```bash

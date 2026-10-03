@@ -11,7 +11,7 @@ from pathlib import Path
 
 IMPORT_DIR = ".import_files"
 RAW_DIR = "10_原始材料"
-FIGURES_DIR = "assets/figures"
+FIGURES_DIR = "assets"
 UNKNOWN = "未明确"
 
 
@@ -120,6 +120,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--paper-link", help="Optional paper link")
     parser.add_argument("--code-link", help="Optional code link")
     parser.add_argument("--slug", help="Optional output directory name")
+    parser.add_argument("--scope", choices=("工作", "个人"), default="工作", help="材料所属范围")
     parser.add_argument("--device", default="auto", help="Docling accelerator device")
     parser.add_argument("--ocr", action="store_true", help="Enable OCR in docling")
     parser.add_argument(
@@ -142,8 +143,8 @@ def main() -> int:
         raise FileNotFoundError(f"vault root not found: {vault_root}")
 
     import_dir = Path(IMPORT_DIR)
-    output_dir = Path(RAW_DIR)
-    figures_root = Path(FIGURES_DIR)
+    output_dir = Path(RAW_DIR) / args.scope / "论文总结"
+    figures_root = Path(FIGURES_DIR) / args.scope / "figures"
     metadata = merge_metadata(args, args.metadata, pdf_path)
     title = str(metadata.get("title") or "")
     slug = slug_from_pdf(pdf_path, title, args.slug)

@@ -1,6 +1,44 @@
 {
   "choices": [
     {
+      "id": "sunday-note-create-diary",
+      "name": "创建今日日记",
+      "type": "Macro",
+      "command": true,
+      "macro": {
+        "id": "sunday-note-create-diary-macro",
+        "name": "创建今日日记",
+        "commands": [
+          {
+            "id": "sunday-note-create-diary-script",
+            "name": "create_or_open_diary",
+            "type": "UserScript",
+            "path": "SundayNoteAgent/automation/quickadd/create_or_open_diary.js"
+          }
+        ]
+      },
+      "runOnStartup": false
+    },
+    {
+      "id": "sunday-note-create-daily",
+      "name": "创建每日记录",
+      "type": "Macro",
+      "command": true,
+      "macro": {
+        "id": "sunday-note-create-daily-macro",
+        "name": "创建每日记录",
+        "commands": [
+          {
+            "id": "sunday-note-create-daily-script",
+            "name": "create_daily",
+            "type": "UserScript",
+            "path": "SundayNoteAgent/automation/quickadd/create_daily.js"
+          }
+        ]
+      },
+      "runOnStartup": false
+    },
+    {
       "id": "sunday-note-rollup-week",
       "name": "统计本周打卡",
       "type": "Macro",
@@ -15,7 +53,7 @@
             "type": "UserScript",
             "path": "SundayNoteAgent/automation/quickadd/rollup.js",
             "settings": {
-              "rollup": "weekly_checkins"
+              "period": "week"
             }
           }
         ]
@@ -23,21 +61,21 @@
       "runOnStartup": false
     },
     {
-      "id": "sunday-note-rollup-month-pack",
+      "id": "sunday-note-rollup-month",
       "name": "刷新每月统计",
       "type": "Macro",
       "command": true,
       "macro": {
-        "id": "sunday-note-rollup-month-pack-macro",
+        "id": "sunday-note-rollup-month-macro",
         "name": "刷新每月统计",
         "commands": [
           {
-            "id": "sunday-note-rollup-month-pack-script",
+            "id": "sunday-note-rollup-month-script",
             "name": "rollup",
             "type": "UserScript",
             "path": "SundayNoteAgent/automation/quickadd/rollup.js",
             "settings": {
-              "rollup": "month_pack_checkins"
+              "period": "month"
             }
           }
         ]

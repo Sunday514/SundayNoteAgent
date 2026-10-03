@@ -271,7 +271,16 @@ ensure_vault_dirs() {
     "$VAULT_ROOT/30_知识库" \
     "$VAULT_ROOT/40_个人写作" \
     "$VAULT_ROOT/个人模板" \
-    "$VAULT_ROOT/assets/figures"
+    "$VAULT_ROOT/assets/工作/figures" \
+    "$VAULT_ROOT/assets/个人/figures"
+
+  local layer scope
+  for layer in 10_原始材料 20_每日记录 21_每周记录 22_每月记录 23_项目复盘; do
+    for scope in 工作 个人; do
+      mkdir -p "$VAULT_ROOT/$layer/$scope"
+      touch "$VAULT_ROOT/$layer/$scope/.gitkeep"
+    done
+  done
 
   touch \
     "$VAULT_ROOT/.import_files/.gitkeep" \
@@ -283,7 +292,8 @@ ensure_vault_dirs() {
     "$VAULT_ROOT/30_知识库/.gitkeep" \
     "$VAULT_ROOT/40_个人写作/.gitkeep" \
     "$VAULT_ROOT/个人模板/.gitkeep" \
-    "$VAULT_ROOT/assets/figures/.gitkeep"
+    "$VAULT_ROOT/assets/工作/figures/.gitkeep" \
+    "$VAULT_ROOT/assets/个人/figures/.gitkeep"
 }
 
 ensure_personal_context_file() {
@@ -300,7 +310,9 @@ ensure_syncthing_ignores() {
   local target="$VAULT_ROOT/.stignore"
   local pattern
 
-  for pattern in "/$PROJECT_DIR_NAME" "/.import_files"; do
+  copy_if_missing "$SCAFFOLD_DIR/.stignore" "$target"
+  while IFS= read -r pattern || [ -n "$pattern" ]; do
+    case "$pattern" in ''|\#*) continue ;; esac
     if [ -f "$target" ] && grep -Fxq -- "$pattern" "$target"; then
       continue
     fi
@@ -308,7 +320,7 @@ ensure_syncthing_ignores() {
       printf '\n' >> "$target"
     fi
     printf '%s\n' "$pattern" >> "$target"
-  done
+  done < "$SCAFFOLD_DIR/.stignore"
 }
 
 paper_skill_path="$VAULT_ROOT/.agents/skills/paper-summarizer"
@@ -320,8 +332,9 @@ fi
 require_source_file "$SCAFFOLD_DIR/AGENTS.md"
 require_source_file "$SCAFFOLD_DIR/首页.md"
 require_source_file "$SCAFFOLD_DIR/.gitignore"
-require_source_file "$SOURCE_ROOT/config/quickadd-rollups.json"
+require_source_file "$SCAFFOLD_DIR/.stignore"
 require_source_file "$SOURCE_ROOT/config/obsidian/calendar.json"
+require_source_file "$SOURCE_ROOT/config/obsidian/daily-notes.json"
 require_source_file "$SOURCE_ROOT/config/obsidian/quickadd.json"
 require_source_file "$SCRIPT_DIR/configure_optional_integrations.py"
 if [ "$ROUTINE_TEMPLATES_MODE" = managed ]; then
@@ -352,14 +365,11 @@ fi
 
 preflight_container_dir "$VAULT_ROOT/.agents"
 preflight_container_dir "$VAULT_ROOT/.agents/skills"
-preflight_container_dir "$VAULT_ROOT/.sunday-note-agent"
-preflight_container_dir "$VAULT_ROOT/.sunday-note-agent/config"
 
 preflight_managed_file "$VAULT_ROOT/AGENTS.md"
 preflight_local_file "$VAULT_ROOT/首页.md"
 preflight_local_file "$VAULT_ROOT/.gitignore"
 preflight_append_file "$VAULT_ROOT/.stignore"
-preflight_local_file "$VAULT_ROOT/.sunday-note-agent/config/quickadd-rollups.json"
 preflight_local_file "$VAULT_ROOT/个人上下文.md"
 if [ "$ROUTINE_TEMPLATES_MODE" = managed ]; then
   preflight_local_file "$VAULT_ROOT/个人模板/每日记录.md"
@@ -400,12 +410,11 @@ if [ "$install_paper_summarizer" -eq 1 ]; then
     "$paper_skill_path/assets/embodied_ai_terminology.json" \
     "$paper_skill_path/scripts/write_summary_status.py"
 fi
-copy_if_missing "$SOURCE_ROOT/config/quickadd-rollups.json" "$VAULT_ROOT/.sunday-note-agent/config/quickadd-rollups.json"
 
 if [ -n "$OPTIONAL_CONFIG_PYTHON" ]; then
   optional_config_args=(--vault-root "$VAULT_ROOT")
   if [ "$ROUTINE_TEMPLATES_MODE" = preserve ]; then
-    optional_config_args+=(--skip-calendar)
+    optional_config_args+=(--preserve-templates)
   fi
   if ! "$OPTIONAL_CONFIG_PYTHON" "$SCRIPT_DIR/configure_optional_integrations.py" "${optional_config_args[@]}"; then
     echo "可选集成配置失败；核心安装已完成，Calendar/QuickAdd 未全部配置。" >&2

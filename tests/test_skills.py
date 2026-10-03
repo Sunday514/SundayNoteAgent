@@ -64,6 +64,8 @@ def main() -> None:
 
         # Verify documented resources even when the command includes arguments.
         for relative_path in re.findall(r"`((?:scripts|assets)/[^`\s]+)", body):
+            if relative_path.endswith("/"):
+                continue
             assert (skill_dir / relative_path).is_file(), f"missing resource: {relative_path}"
 
     paper_skill = ROOT / "skills" / "paper-summarizer" / "SKILL.md"

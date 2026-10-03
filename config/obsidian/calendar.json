@@ -2,5 +2,5 @@
   "showWeeklyNote": true,
   "weeklyNoteFormat": "gggg-[W]ww",
   "weeklyNoteTemplate": "个人模板/每周记录.md",
-  "weeklyNoteFolder": "21_每周记录"
+  "weeklyNoteFolder": "21_每周记录/个人"
 }

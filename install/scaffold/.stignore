@@ -1,0 +1,24 @@
+# 工具源码由 Git 管理，导出工具在各设备本地安装。
+/SundayNoteAgent
+/.agents
+/.sunday-note-agent
+.git
+
+# 导入中间产物、凭据、设备配置和运行状态。
+/.import_files
+/.aws
+/.codex
+/.claude
+/.claudian
+/.logs
+/tmp
+/.trash
+__pycache__
+*.pyc
+
+# 保留 Obsidian 可迁移设置，排除设备会话、启动器和索引缓存。
+/.obsidian/workspace.json
+/.obsidian/workspace-mobile.json
+/.obsidian/bin
+/.obsidian/plugins/terminal/data.json
+/.obsidian/copilot-index-*.json

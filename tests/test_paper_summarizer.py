@@ -575,6 +575,15 @@ class SummaryValidationTests(unittest.TestCase):
             self.assertEqual(status["status"], "prepared")
             self.assertEqual(status["step"], "parse")
             self.assertEqual(status["warnings"], [])
+            self.assertEqual(Path(status["summary_path"]), vault / "10_原始材料/工作/论文总结/Fixture Paper.md")
+            self.assertEqual(Path(status["figures_dir"]), vault / "assets/工作/figures/Fixture Paper")
+            personal = subprocess.run(
+                [*result.args, "--scope", "个人"], capture_output=True, text=True,
+            )
+            self.assertEqual(personal.returncode, 0, personal.stderr)
+            status = json.loads(status_path.read_text(encoding="utf-8"))
+            self.assertEqual(Path(status["summary_path"]), vault / "10_原始材料/个人/论文总结/Fixture Paper.md")
+            self.assertEqual(Path(status["figures_dir"]), vault / "assets/个人/figures/Fixture Paper")
 
 
 if __name__ == "__main__":
