@@ -25,11 +25,11 @@ module.exports = async function rollup({ app, variables = {} }, settings = {}) {
 
   const rows = [];
   const totals = new Map();
-  if (period === "week") {
-    const template = await app.vault.adapter.read("个人模板/每日记录.md");
-    const definitions = [...checkboxes(template).keys()].map((name) => ({
+  const template = await app.vault.adapter.read("个人模板/每日记录.md");
+  const definitions = [...checkboxes(template).keys()].map((name) => ({
       name: name.replace(/[:：]\s*$/, "").trim(), detail: /[:：]\s*$/.test(name),
-    }));
+  }));
+  if (period === "week") {
     for (const { name } of definitions) totals.set(name, { done: 0, total: 0 });
     const monday = weekMonday(id);
     for (let day = 0; day < 7; day += 1) {
@@ -41,8 +41,9 @@ module.exports = async function rollup({ app, variables = {} }, settings = {}) {
       for (const [raw, done] of checkboxes(await app.vault.read(file))) {
         const definition = definitions.find((item) => raw === item.name ||
           (item.detail && (raw.startsWith(`${item.name}：`) || raw.startsWith(`${item.name}:`))));
-        const name = definition?.name || raw;
-        const value = totals.get(name) || { done: 0, total: 0 };
+        if (!definition) continue;
+        const name = definition.name;
+        const value = totals.get(name);
         value.total += 1;
         value.done += Number(done);
         totals.set(name, value);
@@ -62,6 +63,7 @@ module.exports = async function rollup({ app, variables = {} }, settings = {}) {
         const match = line.match(/^\|\s*([^|]+?)\s*\|\s*(\d+)\s*\|\s*(\d+)\s*\|/);
         if (!match) continue;
         const name = match[1].trim().replace(/&#124;/g, "|");
+        if (!definitions.some((item) => item.name === name)) continue;
         const value = totals.get(name) || { done: 0, total: 0 };
         value.done += Number(match[2]);
         value.total += Number(match[3]);

@@ -95,7 +95,7 @@ async function testWeekly() {
   const output = fixture.files.get(pathname);
   assert.match(output, /\| 学习阅读 \| 1 \| 2 \| 50% \|/);
   assert.match(output, /\| 运动健身 \| 0 \| 1 \| 0% \|/);
-  assert.match(output, /\| 临时事项 &#124; 户外 \| 1 \| 1 \| 100% \|/);
+  assert.doesNotMatch(output, /临时事项/);
   assert.match(output, /2026-06-30（未创建）/);
   assert.doesNotMatch(output, /\[\[[^\]]*2026-06-30/);
   assert.doesNotMatch(output, /不应统计/);
@@ -108,7 +108,7 @@ async function testWeekly() {
 async function testMonth() {
   const files = baseFiles();
   for (const week of ["27", "28", "29", "30", "31"]) {
-    files[`21_每周记录/个人/2026-W${week}.md`] = "### 打卡统计\n| 学习阅读 | 1 | 2 | 50% |";
+    files[`21_每周记录/个人/2026-W${week}.md`] = "### 打卡统计\n| 学习阅读 | 1 | 2 | 50% |\n| 已取消项目 | 1 | 2 | 50% |";
   }
   const fixture = makeApp(files);
   await rollup({ app: fixture.app, variables: { month: "2026-07" } }, { period: "month" });
@@ -116,6 +116,7 @@ async function testMonth() {
   assert.match(output, /\| 学习阅读 \| 4 \| 8 \| 50% \|/);
   for (const week of ["27", "28", "29", "30"]) assert.match(output, new RegExp(`W${week}`));
   assert.doesNotMatch(output, /W31/);
+  assert.doesNotMatch(output, /已取消项目/);
   assert.match(output, /月计划/);
   assert.match(output, /月总结/);
 }
