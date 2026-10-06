@@ -63,13 +63,13 @@ def call(config, name, args):
         ids = args["finding_ids"]
         if not isinstance(ids, list) or len(ids) != 1:
             raise ValueError("每轮仅展示一段摘要，最多一个决策")
-        items = [finding(config, root, session_id, ids[0])]
+        i = finding(config, root, session_id, ids[0])
         visible = [{"id": i["id"],
                     "summary": i["summary"], "findings": i["findings"],
                     "decision": i.get("decision"), "copy_text": copy_text(i),
                     "status": i["status"], "selection": i.get("draft_selection", i.get("selection", "")),
-                    "other": i.get("draft_other", i.get("other", False)), "submission_error": i.get("submission_error", "")} for i in items
-                   if i["status"] in ("new", "confirmed", "submitting", "submitted", "ignored", "acknowledged")]
+                    "other": i.get("draft_other", i.get("other", False)), "submission_error": i.get("submission_error", "")}
+                   ] if i["status"] in ("new", "confirmed", "submitting", "submitted", "ignored", "acknowledged") else []
         return {"content": [], "structuredContent": {"session_id": session_id, "items": visible}}
     if name != ACTION_TOOL:
         raise ValueError("未知工具")

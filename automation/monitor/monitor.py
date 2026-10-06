@@ -26,7 +26,7 @@ MAX_TEXT = 18000
 
 from feedback import MARKER, deliver
 from app_status import read_thread
-from contracts import (SUMMARY_SCHEMA, RESULT_SCHEMA, CHECKPOINT_SCHEMA,
+from contracts import (RESULT_SCHEMA, CHECKPOINT_SCHEMA,
                        CHECK_SCHEMA, validate, validate_feedback, resolve_handoff)
 from facts import baseline, review_base, save_review_base, collect_target, target_current, turn_tools, version_current, related_repositories
 
@@ -741,11 +741,6 @@ def evaluate(config, event):
         return value, round(time.monotonic() - start, 2)
 
 
-def finalize(root, config, event, result, elapsed):
-    with lock(project_dir(root, event["cwd"]) / "context.lock"):
-        return finalize_locked(root, config, event, result, elapsed)
-
-
 def verified_sources(sources, event, config):
     evidence = [evidence_snapshot(s, event, config["vault"], config.get("reference_roots", [])) for s in sources]
     if any(s["verification"] in ("unverified", "quote_not_matched") for s in evidence):
@@ -769,50 +764,51 @@ def record_summary(root, event, result, elapsed, findings):
                   "model": MODEL, "model_generated": result.get("model_generated", True), "seconds": elapsed})
 
 
-def finalize_locked(root, config, event, result, elapsed):
-    shared = project_context(root, event)
-    changed = False
-    for update in result.get("context_updates", []):
-        evidence = evidence_snapshot(update["source"], event, config["vault"], config.get("reference_roots", []))
-        if evidence["verification"] in ("unverified", "quote_not_matched") or not update["key"].strip() or not update["value"].strip():
-            continue
-        previous = shared["facts"].get(update["key"], {})
-        event_time = event.get("created", time.time())
-        if previous.get("value") != update["value"] and event_time >= previous.get("updated", 0):
-            shared["facts"][update["key"]] = {"value": update["value"], "source": evidence,
-                "session_id": event["session_id"], "turn_id": event["turn_id"], "updated": event_time}
-            changed = True
-    context_path = project_dir(root, event["cwd"]) / "context.json"
-    if changed or not context_path.exists():
-        atomic(context_path, shared)
-    findings = []
-    report = result.get("feedback")
-    if report:
-        try:
-            report = verified_feedback(report, event, config)
-        except ValueError:
-            record_summary(root, event, result, elapsed, [])
-            raise
-        fid = digest([event["session_id"], event["cwd"], report])[:24]
-        path = root / "findings" / (fid + ".json")
-        if not path.exists():
-            atomic(path, {**report, "id": fid, "schema_version": 2, "status": "new",
-                          "session_id": event["session_id"], "turn_id": event["turn_id"],
-                          "project": event["cwd"], "codex": event.get("codex", ""),
-                          "evidence_versions": result.get("evidence_versions", []),
-                          "target": result.get("target", {}),
-                          "created": time.time(), "feedback": "pending"})
-            findings.append(fid)
-        else:
-            previous = read_json(path)
-            if previous.get("status") == "new" and previous.get("feedback") == "pending":
-                previous.update(target=result.get("target", {}),
-                                evidence_versions=result.get("evidence_versions", []),
-                                turn_id=event["turn_id"], codex=event.get("codex", ""), reviewed_at=time.time())
-                atomic(path, previous)
+def finalize(root, config, event, result, elapsed):
+    with lock(project_dir(root, event["cwd"]) / "context.lock"):
+        shared = project_context(root, event)
+        changed = False
+        for update in result.get("context_updates", []):
+            evidence = evidence_snapshot(update["source"], event, config["vault"], config.get("reference_roots", []))
+            if evidence["verification"] in ("unverified", "quote_not_matched") or not update["key"].strip() or not update["value"].strip():
+                continue
+            previous = shared["facts"].get(update["key"], {})
+            event_time = event.get("created", time.time())
+            if previous.get("value") != update["value"] and event_time >= previous.get("updated", 0):
+                shared["facts"][update["key"]] = {"value": update["value"], "source": evidence,
+                    "session_id": event["session_id"], "turn_id": event["turn_id"], "updated": event_time}
+                changed = True
+        context_path = project_dir(root, event["cwd"]) / "context.json"
+        if changed or not context_path.exists():
+            atomic(context_path, shared)
+        findings = []
+        report = result.get("feedback")
+        if report:
+            try:
+                report = verified_feedback(report, event, config)
+            except ValueError:
+                record_summary(root, event, result, elapsed, [])
+                raise
+            fid = digest([event["session_id"], event["cwd"], report])[:24]
+            path = root / "findings" / (fid + ".json")
+            if not path.exists():
+                atomic(path, {**report, "id": fid, "schema_version": 2, "status": "new",
+                              "session_id": event["session_id"], "turn_id": event["turn_id"],
+                              "project": event["cwd"], "codex": event.get("codex", ""),
+                              "evidence_versions": result.get("evidence_versions", []),
+                              "target": result.get("target", {}),
+                              "created": time.time(), "feedback": "pending"})
                 findings.append(fid)
-    record_summary(root, event, result, elapsed, findings)
-    return findings
+            else:
+                previous = read_json(path)
+                if previous.get("status") == "new" and previous.get("feedback") == "pending":
+                    previous.update(target=result.get("target", {}),
+                                    evidence_versions=result.get("evidence_versions", []),
+                                    turn_id=event["turn_id"], codex=event.get("codex", ""), reviewed_at=time.time())
+                    atomic(path, previous)
+                    findings.append(fid)
+        record_summary(root, event, result, elapsed, findings)
+        return findings
 
 
 def worker(config_path, runtime, evaluator=evaluate, status_reader=read_thread,

@@ -149,10 +149,8 @@ def configure(vault, codex_home, applications, uninstall=False, proxy_url=None):
                 shutil.rmtree(p)
         print("Monitor 已停用并移除自身 Hook、MCP 注册和托管副本；日志保留。")
         return
-    needed = ["rg"]
-    missing = [name for name in needed if not shutil.which(name)]
-    if missing:
-        raise ValueError("缺少依赖：" + ", ".join(missing))
+    if not shutil.which("rg"):
+        raise ValueError("缺少依赖：rg")
     updated, change = enable_hooks(updated)
     tomllib.loads(updated)
     stop_workers(runtime, root)

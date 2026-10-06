@@ -19,6 +19,7 @@ sys.path.insert(0, str(ROOT / "automation" / "monitor"))
 import monitor as m
 import feedback
 import widget_server as widget
+from contracts import SUMMARY_SCHEMA
 
 spec = importlib.util.spec_from_file_location("installer", ROOT / "install" / "configure_monitor.py")
 installer = importlib.util.module_from_spec(spec)
@@ -26,7 +27,7 @@ spec.loader.exec_module(installer)
 
 
 def empty():
-    return {"context_updates": [], "summary": {k: [] for k in m.SUMMARY_SCHEMA["properties"]},
+    return {"context_updates": [], "summary": {k: [] for k in SUMMARY_SCHEMA["properties"]},
             "checked": [], "feedback": None}
 
 
