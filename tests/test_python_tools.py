@@ -81,6 +81,7 @@ def test_lint_headers() -> None:
                 sources='["fixture"] # inline list comment',
                 keywords="[user's guide] # inline list comment",
             )
+            .replace('last_queried: ""\nquery_count: 0\n', '')
             + "\n本文主要介绍一个真实结论。\n",
             encoding="utf-8",
         )
@@ -100,7 +101,7 @@ def test_lint_headers() -> None:
             encoding="utf-8",
         )
         (wiki / "零次错配.md").write_text(
-            wiki_header('"零次错配"', last_queried="2026-07-12", query_count="0") + "\n内容。\n",
+            wiki_header('"零次错配"', last_queried="obsolete", query_count="unused") + "\n内容。\n",
             encoding="utf-8",
         )
         (wiki / "缺字段.md").write_text("---\ntopic: 缺字段\n---\n\n内容。\n", encoding="utf-8")
@@ -113,12 +114,12 @@ def test_lint_headers() -> None:
         )
         reports = {report["path"]: report for report in result["reports"]}
         assert result["scanned"] == 8
-        assert result["issue_files"] == 7
+        assert result["issue_files"] == 6
         assert "30_知识库/有效.md" not in reports, "stale dates, body text, and topic keywords are not header errors"
         assert {issue["code"] for issue in reports["30_知识库/重复一.md"]["issues"]} == {"duplicate_topic"}
         bad_codes = {issue["code"] for issue in reports["30_知识库/错误字段.md"]["issues"]}
-        assert {"bad_date", "bad_count", "bad_sources", "bad_topic", "empty_keywords", "query_mismatch"} <= bad_codes
-        assert {issue["code"] for issue in reports["30_知识库/零次错配.md"]["issues"]} == {"query_mismatch"}
+        assert {"bad_date", "bad_count", "bad_sources", "bad_topic", "empty_keywords"} <= bad_codes
+        assert "30_知识库/零次错配.md" not in reports, "legacy query fields are ignored"
         assert any(issue["code"] == "missing_field" for issue in reports["30_知识库/缺字段.md"]["issues"])
         assert reports["30_知识库/缺header.md"]["issues"][0]["code"] == "missing_header"
         assert reports["30_知识库/损坏header.md"]["issues"][0]["code"] == "broken_header"
@@ -136,7 +137,7 @@ def test_lint_headers() -> None:
                 "1",
             )
         )
-        assert limited["issue_files"] == 7 and len(limited["reports"]) == 1
+        assert limited["issue_files"] == 6 and len(limited["reports"]) == 1
         run_fail(str(LINT_HEADERS), "--root", str(vault), "--scope", str(vault.parent))
         assert snapshot(vault) == before, "header lint must not modify the vault"
 

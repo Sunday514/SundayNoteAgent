@@ -415,6 +415,11 @@ if [ "$ROUTINE_TEMPLATES_MODE" = managed ]; then
 fi
 
 for skill in "${CORE_SKILLS[@]}"; do preflight_managed_dir "$VAULT_ROOT/.agents/skills/$skill"; done
+query_skill="$VAULT_ROOT/.agents/skills/sunday-note-query"
+preflight_container_dir "$query_skill"
+preflight_container_dir "$query_skill/scripts"
+obsolete_query_script="$query_skill/scripts/update_query_header.py"
+preflight_managed_file "$obsolete_query_script"
 if [ "$install_paper_summarizer" -eq 1 ]; then
   preflight_managed_dir "$paper_skill_path"
 fi
@@ -441,6 +446,7 @@ if [ "$INSTALL_MODE" = personal ]; then ensure_personal_context_file; fi
 for skill in "${CORE_SKILLS[@]}"; do
   copy_managed_dir "$SOURCE_ROOT/skills/$skill" "$VAULT_ROOT/.agents/skills/$skill"
 done
+rm -f -- "$obsolete_query_script"
 if [ "$install_paper_summarizer" -eq 1 ]; then
   copy_managed_dir "$SOURCE_ROOT/skills/paper-summarizer" "$paper_skill_path"
   rm -f \

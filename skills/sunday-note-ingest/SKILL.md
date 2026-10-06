@@ -32,8 +32,8 @@ description: 用户要求导入资料或工作笔记、整理记录，或将结�
 ## Header、index 和 log
 
 - 知识或来源关系实质变化时：`last_updated` 为当天，`update_count` 每页每轮加 1；同步相关正文链接与 `sources`，汇总去重实际来源。
-- 已有 `topic` 保持稳定，`keywords` 仅按检索价值调整；保留 `last_queried` 和 `query_count`。
-- 新页完整 header：`last_updated` 为当天，`update_count: 1`、`last_queried: ""`、`query_count: 0`，填写实际 `sources`、单一 `topic` 和真实检索词 `keywords`。
+- 已有 `topic` 保持稳定，`keywords` 仅按检索价值调整；已有其他 header 字段原样保留。
+- 新页完整 header：`last_updated` 为当天，`update_count: 1`，填写实际 `sources`、单一 `topic` 和真实检索词 `keywords`。
 - 无实质变化不更新 header 或 index；核心 Wiki 导航变化才更新 index，新建 Wiki 才按现有格式登记创建日志。
 - 纯目录迁移和等价链接修复不增加 Wiki 更新次数。
 

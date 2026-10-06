@@ -1,132 +1,72 @@
 # SundayNoteAgent
 
-SundayNoteAgent 是一套用于个人或工作 Obsidian 知识库的 agent 工具层。它提供安装器、Codex / agent skills、QuickAdd 自动化脚本、固定 vault 布局和最小 Routine 模板，放在 vault 的 `SundayNoteAgent/` 目录下作为独立 repo 使用。
+利用用户已有知识与个人上下文改善回答，并将有长期价值的新信息沉淀为可复用知识。Markdown vault 保存内容，Skills 定义工作流，脚本执行确定性操作。
 
-个人笔记、带具体条目的个人模板、附件、图片和本地运行状态由父知识库管理，不属于本仓库。
+## 功能
+
+| 功能 | 入口与边界 |
+| --- | --- |
+| 使用知识 | Query 只读检索并回答；个人上下文按需参与路由与取舍，不改变来源事实 |
+| 积累知识 | Ingest 分别判断知识增量和来源维护，无变化不写；论文总结生成单篇 Raw 与必要原图 |
+| 显式维护 | Lint 全库检查与维护，写入由子 Agent 执行、主 Agent 复核；Context 经确认校准个人上下文 |
+| 日常记录 | Routine 使用“计划—记录”；QuickAdd 创建每日记录/日记，更新已有周/月打卡统计 |
+| 可选旁路 | Monitor 只读检查开发会话、展示建议，不替代正式审查，不自动执行建议 |
+| 开发诊断 | KDI 使用隔离工作区和匿名评审比较知识收益；不是日常使用前置条件 |
+
+工作流以 [Skills](skills/) 和安装后的根规则为准。查询不维护计数；旧页面的 `last_queried`、`query_count` 保留为历史字段，不再生成、更新或校验。
 
 ## 安装与更新
 
-在 vault 根目录放置本仓库，首次安装选择个人或工作模式：
+当前要求仓库位于 vault 的 `SundayNoteAgent/`；QuickAdd 依赖此位置。在 vault 根目录执行：
 
 ```bash
 git clone git@github.com:Sunday514/SundayNoteAgent.git SundayNoteAgent
 bash SundayNoteAgent/install/install.sh --vault-root . --mode personal
-# 独立工作 vault 使用 --mode work
+# 独立工作 vault 改用 --mode work
 ```
 
-- `personal`：工作与个人分区、个人 Routine、写作及个性化上下文。
-- `work`：只创建工作原始材料、日/周/月记录、项目复盘、工作附件和统一 Wiki；使用工作模板，不创建个人内容或日记/打卡入口。
+- `personal`：工作与个人分区、个人 Routine、写作和个人上下文。
+- `work`：工作 Raw、日/周/月记录、项目、附件及统一 Wiki，不创建个人内容。
+- 后续更新模式自动保留；已有自定义模板可用 `--routine-templates preserve`。
+- 论文和 Monitor 分别通过 `--with-paper-summarizer`、`--with-monitor` 启用。
 
-两种模式共用 Ingest、Query、Lint。安装器同时维护本机 `.stignore`，排除导入中间产物和运行状态；工作模式额外排除个人目录、附件、模板及上下文的同步。
-
-安装器记住模式，后续更新直接重跑：
+关闭 Obsidian 后更新，完成后重新打开：
 
 ```bash
 git -C SundayNoteAgent pull --ff-only
 bash SundayNoteAgent/install/install.sh --vault-root .
 ```
 
-已有自定义模板时加 `--routine-templates preserve`。论文总结和 Monitor 分别通过 `--with-paper-summarizer`、`--with-monitor` 启用。安装前关闭 Obsidian，安装后重新打开；安装器不删除已有内容，也不自动执行 Git 操作。
+完整选项、同步范围、升级保留行为和 Monitor 操作见[安装说明](install/README.md)。安装器不迁移知识正文，也不执行 Git 操作。
 
-完整的模式范围、托管边界及可选组件见[安装说明](install/README.md)。
+## 内容与源码
 
-## 目录结构
+Raw 保存外部来源总结，Routine 保存活动与项目证据，Wiki 提炼稳定知识；Journal 仅在明确要求时读写。未链接的 Raw 是检查线索，不要求每份材料都产生 Wiki 修改。
 
-父 vault 使用固定一级布局，安装器和 skills 直接依赖这些路径：
+Raw、日/周/月记录、项目与长期图片按工作/个人分区，Wiki 统一；工作任务不补读个人来源。目录过滤不是完整隐私隔离，严格工作隔离应使用明确的共享集合或独立 vault。
 
-| 路径 | 角色 | 默认维护边界 |
-|---|---|---|
-| `首页.md` | 知识库导航入口 | 由父 vault 维护 |
-| `个人上下文.md` | 个人模式的稳定上下文 | 只在用户明确初始化或校准后更新 |
-| `.import_files/` | PDF、docx、网页导出、解析产物和临时日志 | 只由导入流程管理 |
-| `10_原始材料/` | 论文、书籍、课程等长期来源总结 | 默认只读 |
-| `20_每日记录/` | Daily Routine | 明确操作和目标后写入 |
-| `21_每周记录/` | Weekly Routine | 明确操作和目标后写入 |
-| `22_每月记录/` | Monthly Routine | 明确操作和目标后写入 |
-| `23_项目复盘/` | Project Routine | 明确操作和目标后写入 |
-| `30_知识库/` | agent 可维护的长期 Wiki | 按 skills 和根规则维护 |
-| `40_个人写作/` | 个人模式的 Journal | 仅用户明确要求时读写 |
-| `assets/工作/figures/`、`assets/个人/figures/` | 按来源归属的长期图像 | 个人可引用工作，文档使用相对路径 |
-| `个人模板/` 或 `工作模板/` | 按安装模式部署的 Routine 模板 | 本地内容不回写工具仓库 |
-| `SundayNoteAgent/` | 可公开的工具层源码 | 由 Git 和安装器维护 |
-| `.agents/` | 安装后的 agent skills | 由安装器托管 |
-| `.sunday-note-agent/` | 可选 Monitor 运行副本 | 由对应安装流程维护 |
-| `.obsidian/` | Obsidian 插件配置和运行状态 | 仅合并已预装可选插件的项目字段 |
+`.import_files/` 是不参与同步的导入缓存，不作为长期来源链接。论文只引用稳定在线来源或 vault 内长期文件。Syncthing 同步知识和可迁移设置，工具及设备状态由各端部署。
 
-`.import_files/` 是导入流程的临时目录，不属于知识分层。完成整理的长期来源总结进入 `10_原始材料/`，长期引用的图像进入所属范围的附件目录。
+源码职责：
 
-Raw、Daily、Weekly、Monthly 和 Project 各层内划分 `工作/`、`个人/`；Wiki 保持统一主题分类。个人可引用工作来源，工作任务只使用工作来源与 Wiki。目录提供权限部署边界，不自行实现访问控制。
+- `skills/`：语义工作流与其必要脚本；`automation/`：QuickAdd 和 Monitor。
+- `install/`：安装、scaffold 与集成；`templates/`：无个人条目的 Routine 结构。
+- `migration/`：外部资料导入辅助工具；`tests/` 与 `validation/`：脱敏回归和开发诊断。
 
-Routine 统一使用“计划—记录”。Agent 负责资料导入、已有项目更新、周/月整理和链接维护。脚本只保留每日记录/日记创建，以及已有记录统计块的更新：周统计读取个人 Daily，月统计汇总周日落在该月的完整周。个人打卡项目由个人 Daily 模板定义，缺失记录或打卡项不计入分母。
+个人正文、模板条目、附件、设备路径、凭据和运行日志不提交本仓库。开发规则见 [AGENTS.md](AGENTS.md)。
 
-Syncthing 同步文档、附件、个人模板、最终输出和可迁移 Obsidian 设置；忽略 Git 元数据、工具源码及安装副本、导入中间产物、凭据、日志、设备会话、临时文件和索引缓存。文档冲突文件不统一忽略。`.stignore` 不会由 Syncthing 自动同步：每台设备通过 Git 获取工具层并运行安装器，部署本地规则和 QuickAdd 脚本。忽略规则不删除此前已同步的文件。
-
-工具仓库结构：
-
-```text
-AGENTS.md                 # 子项目开发规则
-automation/               # QuickAdd 等自动化脚本源文件
-config/                   # Obsidian 的最小集成字段
-install/                  # 安装器和父知识库 scaffold
-migration/                # 可复用知识库迁移辅助工具
-skills/                   # Codex / agent skills
-templates/                # 无具体条目的 Routine 最小模板
-tests/                    # 脱敏 fixture 和统一回归入口
-validation/               # 仅供开发使用的隔离诊断 CLI
-```
-
-`templates/` 保存 Daily、Weekly 和 Monthly 的最小结构契约；Daily 模板只在缺失时创建，Weekly 和 Monthly 模板由安装器刷新。`config/obsidian/` 只保存 Daily Notes、Calendar 和 QuickAdd 的最小项目字段，不包含插件启用列表、workspace、设备路径、环境变量、代理、sessions 或权限运行状态。
-
-## Monitor（可选）
-
-Monitor 在配置项目范围内的 Codex 主会话每轮回复后，用订阅内的 `gpt-6-luna / xhigh` 整理历史并按需检查；复杂任务最多派发三个原生子 Agent，代码 Review 使用 `gpt-6-sol / high`。不同会话并行、同一会话串行；待发反馈随新内容滚动复核，仅在来源 App 明确空闲且轮次未变时回传。每份反馈保留全部必要发现，紧凑 widget 默认显示摘要、发现数量和至多一个决策，详情可展开或完整复制。无法可靠查询状态时只记录、不自动推送。
-
-主 Agent 只做快速分派、会话记录和汇总，不重复子任务调查。面板“处理”立即交接，“确认／忽略”只保存，并在下一轮正常请求中补充上下文；确认后仍可转为处理。
-
-```bash
-bash SundayNoteAgent/install/install.sh --vault-root . --with-monitor --monitor-only
-```
-
-安装后在 Codex `/hooks` 中审阅并信任两个 Hook，并重新加载 MCP 工具。日志、建议及状态集中在 `.logs/codex/`。需要 Linux、Python 3.11+、Codex CLI 和 rg；反馈需要原生队列和支持 MCP Apps 的客户端。只使用 ChatGPT 订阅登录，不回退 API 或其他模型。
-
-详见 [Monitor 安装和使用](install/README.md#monitor可选)。
-
-## 相关入口
-
-- [安装器说明](install/README.md)
-- [子项目开发规则](AGENTS.md)
-
-## 回归检查
-
-修改安装器、QuickAdd 自动化或 query / lint 脚本后，运行：
+## 验证
 
 ```bash
 bash tests/run.sh
 ```
 
-检查只使用 Bash、Node 和 Python 标准运行时，在临时目录中生成脱敏 fixture，验证核心 skill、安装导出、Query/Lint 脚本和 QuickAdd，不读取父 vault。
+回归使用 Bash、Node、Python 和临时脱敏 fixture，不读取真实 vault。机械检查通过不代表模型判断或知识库整体有效。
 
-## 知识增量诊断
+KDI 的 `validation/knowledge_delta.py` 提供 `prepare/run/judge/report/all/cleanup`；参数见各子命令 `--help`，suite 示例见 `tests/fixtures/knowledge_delta/smoke-suite.json`。真实运行会调用模型及 Web，必须先冻结输入并检查隔离与被测版本；`--dry-run` 不调用模型。产物只放 `/tmp`，不将私人诊断材料提交仓库。
 
-`validation/knowledge_delta.py` 用冻结 suite 构造 G / O / S 隔离工作区，并分阶段生成候选、两阶段匿名 Judge 包和归因报告。`prepare` 会核对当前仓库与 vault 中四个基础 Skill 的身份；不一致时停止运行。运行目录必须位于 `/tmp`；仓库只附带脱敏 smoke fixture，不包含真实场景或个人来源。
+## 插件化方向（待实现）
 
-```bash
-python validation/knowledge_delta.py prepare --suite SUITE.json --vault-root VAULT --run-dir /tmp/kdi-run
-python validation/knowledge_delta.py run --run-dir /tmp/kdi-run --model MODEL --dry-run
-python validation/knowledge_delta.py judge --run-dir /tmp/kdi-run --model MODEL --dry-run
-python validation/knowledge_delta.py report --run-dir /tmp/kdi-run
-python validation/knowledge_delta.py cleanup --run-dir /tmp/kdi-run --confirm-suite-id SUITE_ID
-```
+先收敛核心行为，再解除仓库位置依赖、封装插件、验证迁移与回退。插件分发 Skills、可选 Monitor 和远程文档 MCP 连接；VPS 服务独立运行，vault 继续保存知识及必要的 Obsidian 资源。
 
-suite version 2 的 Ingest 场景必须声明 `write_authorization_turn`，复用追问必须是不依赖其他候选对话的完整问题。Judge 先在看不到组别映射的情况下冻结候选评分，再读取阶段映射进行 G / O / S 归因；候选行为失败与实验协议失败分别记录。`--dry-run` 只生成工作区和调用计划。移除该参数会调用模型和实时 web，实际诊断前必须先检查冻结输入与隔离条件。`cleanup` 仅删除 suite ID 明确匹配的 `/tmp` 诊断目录。
-
-## 隐私边界
-
-本仓库只保存可复用工具层，不保存个人知识库正文。不要把以下内容提交到 SundayNoteAgent：
-
-- 个人笔记正文
-- 带具体条目的个人模板正文
-- 私有附件、截图或图片
-- token、API key、本机绝对路径
-- Obsidian workspace 运行状态
-- 一次性调试输出或临时工作记录
+当前不能直接移动源码目录。插件化不扩大文件权限，不把备份、同步或 iOS 阅读服务纳入核心工作流，也不重写 Monitor/KDI。

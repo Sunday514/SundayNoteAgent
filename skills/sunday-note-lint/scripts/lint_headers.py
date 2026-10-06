@@ -15,8 +15,6 @@ from typing import Any, Iterable
 REQUIRED_FIELDS = (
     "last_updated",
     "update_count",
-    "last_queried",
-    "query_count",
     "sources",
     "topic",
     "keywords",
@@ -178,9 +176,7 @@ def parse_header(header_text: str) -> dict[str, Any]:
     return header
 
 
-def valid_date(value: Any, allow_empty: bool) -> bool:
-    if value == "" and allow_empty:
-        return True
+def valid_date(value: Any) -> bool:
     if not isinstance(value, str) or not value:
         return False
     try:
@@ -200,13 +196,10 @@ def inspect_header(header: dict[str, Any], duplicate_topics: set[str]) -> list[I
         if field not in header:
             issues.append(Issue("missing_field", field, f"missing {field}"))
 
-    for field, allow_empty in (("last_updated", False), ("last_queried", True)):
-        if field in header and not valid_date(header[field], allow_empty):
-            issues.append(Issue("bad_date", field, f"{field} must be YYYY-MM-DD" + (" or empty" if allow_empty else "")))
-
-    for field in ("update_count", "query_count"):
-        if field in header and not valid_count(header[field]):
-            issues.append(Issue("bad_count", field, f"{field} must be a non-negative integer"))
+    if "last_updated" in header and not valid_date(header["last_updated"]):
+        issues.append(Issue("bad_date", "last_updated", "last_updated must be YYYY-MM-DD"))
+    if "update_count" in header and not valid_count(header["update_count"]):
+        issues.append(Issue("bad_count", "update_count", "update_count must be a non-negative integer"))
 
     for field in ("sources", "keywords"):
         if field not in header:
@@ -226,13 +219,6 @@ def inspect_header(header: dict[str, Any], duplicate_topics: set[str]) -> list[I
         elif topic in duplicate_topics:
             issues.append(Issue("duplicate_topic", "topic", "topic appears in multiple files"))
 
-    query_count = header.get("query_count")
-    last_queried = header.get("last_queried")
-    if valid_count(query_count) and valid_date(last_queried, True):
-        if query_count == 0 and last_queried != "":
-            issues.append(Issue("query_mismatch", "last_queried", "last_queried must be empty when query_count is 0"))
-        elif query_count > 0 and last_queried == "":
-            issues.append(Issue("query_mismatch", "last_queried", "last_queried is required when query_count is positive"))
     return issues
 
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Dependency-free fixtures for Query search and usage updates."""
+"""Dependency-free fixtures for read-only Query search."""
 
 from __future__ import annotations
 
@@ -13,7 +13,6 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 QUERY = ROOT / "skills/sunday-note-query/scripts/query_search.py"
-UPDATE = ROOT / "skills/sunday-note-query/scripts/update_query_header.py"
 
 
 def command(*args: str, path: str | None = None, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -40,9 +39,9 @@ def run_fail(*args: str) -> None:
     assert result.returncode != 0, f"command unexpectedly succeeded: {args}"
 
 
-def snapshot(root: Path) -> dict[str, bytes]:
+def snapshot(root: Path) -> dict[str, tuple[bytes, int]]:
     return {
-        path.relative_to(root).as_posix(): path.read_bytes()
+        path.relative_to(root).as_posix(): (path.read_bytes(), path.stat().st_mtime_ns)
         for path in root.rglob("*")
         if path.is_file() and not path.is_symlink()
     }
@@ -51,16 +50,12 @@ def snapshot(root: Path) -> dict[str, bytes]:
 def wiki_header(
     topic: str,
     *,
-    last_queried: str = '""',
-    query_count: str = "0",
     sources: str = '["fixture"]',
     keywords: str = '["fixture"]',
 ) -> str:
     return f"""---
 last_updated: 2026-07-12
 update_count: 1
-last_queried: {last_queried}
-query_count: {query_count}
 sources: {sources}
 topic: {topic}
 keywords: {keywords}
@@ -95,7 +90,7 @@ def test_literal_search() -> None:
             encoding="utf-8",
         )
         (vault / "30_知识库/拆词噪声.md").write_text(
-            wiki_header('"英文拆词噪声"') + "\nworld 出现在这里，model 出现在另一处。\n",
+            wiki_header('"英文拆词噪声"').replace("update_count: 1", "update_count: 1\nlast_queried: 2026-07-12\nquery_count: 8") + "\nworld 出现在这里，model 出现在另一处。\n",
             encoding="utf-8",
         )
         (vault / "30_知识库/多词覆盖.md").write_text(
@@ -161,84 +156,6 @@ def test_literal_search() -> None:
         assert snapshot(vault) == before, "Query search must not modify the vault"
 
 
-def test_usage_updates() -> None:
-    with tempfile.TemporaryDirectory() as temp:
-        vault = Path(temp)
-        for relative in ("30_知识库", "20_每日记录", "10_原始材料", "SundayNoteAgent"):
-            (vault / relative).mkdir()
-
-        page_a = vault / "30_知识库/A.md"
-        page_b = vault / "30_知识库/B.md"
-        page_a.write_text(
-            wiki_header('"A"', last_queried='"" # keep queried comment', query_count="2 # keep count comment")
-            + "\nA body must stay unchanged.\n",
-            encoding="utf-8",
-        )
-        page_b.write_bytes(
-            (wiki_header('"B"').replace('last_queried: ""', "last_queried: # blank comment") + "\nB body.\n")
-            .replace("\n", "\r\n")
-            .encode("utf-8")
-        )
-        maintenance = vault / "30_知识库/知识库维护日志.md"
-        maintenance.write_text(wiki_header('"维护日志"') + "\nlog\n", encoding="utf-8")
-        routine = vault / "20_每日记录/2026-07-12.md"
-        routine.write_text(wiki_header('"Routine"') + "\nroutine\n", encoding="utf-8")
-        raw = vault / "10_原始材料/来源.md"
-        raw.write_text(wiki_header('"Raw"') + "\nraw\n", encoding="utf-8")
-        schema = vault / "SundayNoteAgent/schema.md"
-        schema.write_text(wiki_header('"Schema"') + "\nschema\n", encoding="utf-8")
-
-        output = run(
-            str(UPDATE),
-            "30_知识库/A.md",
-            "30_知识库/A.md",
-            "30_知识库/B.md",
-            "--vault-root",
-            str(vault),
-            "--date",
-            "2026-07-13",
-        )
-        assert output.count("updated:") == 2
-        text_a = page_a.read_text(encoding="utf-8")
-        assert "last_queried: 2026-07-13 # keep queried comment" in text_a
-        assert "query_count: 3 # keep count comment" in text_a
-        assert "A body must stay unchanged." in text_a
-        assert "query_count: 1" in page_b.read_text(encoding="utf-8")
-        assert "last_queried: 2026-07-13 # blank comment" in page_b.read_text(encoding="utf-8")
-        assert b"\r\n" in page_b.read_bytes() and b"\n" not in page_b.read_bytes().replace(b"\r\n", b"")
-
-        run(str(UPDATE), "30_知识库/B.md", "--root", str(vault), "--date", "2026-07-14")
-        assert "query_count: 2" in page_b.read_text(encoding="utf-8")
-
-        bad = vault / "30_知识库/Bad.md"
-        bad.write_text(wiki_header('"Bad"', query_count="invalid") + "\nbad\n", encoding="utf-8")
-        before_failure = snapshot(vault)
-        run_fail(
-            str(UPDATE),
-            "30_知识库/A.md",
-            "30_知识库/Bad.md",
-            "--vault-root",
-            str(vault),
-            "--date",
-            "2026-07-15",
-        )
-        assert snapshot(vault) == before_failure, "preflight failure must prevent every write"
-
-        for rejected in (routine, raw, schema, maintenance):
-            before_rejection = snapshot(vault)
-            run_fail(str(UPDATE), str(rejected), "--vault-root", str(vault))
-            assert snapshot(vault) == before_rejection
-
-        outside = vault.parent / f"{vault.name}-outside.md"
-        outside.write_text(wiki_header('"Outside"') + "\noutside\n", encoding="utf-8")
-        try:
-            link = vault / "30_知识库/OutsideLink.md"
-            link.symlink_to(outside)
-            run_fail(str(UPDATE), str(link), "--vault-root", str(vault))
-        finally:
-            outside.unlink(missing_ok=True)
-
-
 def test_fixed_layout_requires_wiki() -> None:
     with tempfile.TemporaryDirectory() as temp:
         vault = Path(temp)
@@ -247,7 +164,6 @@ def test_fixed_layout_requires_wiki() -> None:
 
 def main() -> None:
     test_literal_search()
-    test_usage_updates()
     test_fixed_layout_requires_wiki()
     print("query fixture passed")
 

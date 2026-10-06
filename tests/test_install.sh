@@ -307,9 +307,8 @@ if grep -Fq "20_每日记录" <<< "$query_output"; then
   fail "installed Query searched Routine directly"
 fi
 
-python "$vault/.agents/skills/sunday-note-query/scripts/update_query_header.py" \
-  "30_知识库/集成测试.md" --vault-root "$vault" --date 2026-07-13 >/dev/null
-assert_file_contains "$vault/30_知识库/集成测试.md" "query_count: 1"
+test ! -e "$vault/.agents/skills/sunday-note-query/scripts/update_query_header.py" || fail "query updater installed"
+assert_file_contains "$vault/30_知识库/集成测试.md" "query_count: 0"
 assert_file_contains "$vault/30_知识库/集成测试.md" "唯一集成词。"
 
 lint_output="$(python "$vault/.agents/skills/sunday-note-lint/scripts/lint_headers.py" \
@@ -332,6 +331,8 @@ printf '%s\n' "stale managed rule" > "$vault/AGENTS.md"
 printf '%s\n' "personal context sentinel" >> "$vault/个人上下文.md"
 printf '%s\n' "stale managed script" > "$vault/.agents/skills/sunday-note-query/scripts/query_search.py"
 printf '%s\n' "extra skill file" > "$vault/.agents/skills/sunday-note-query/local.md"
+printf '%s\n' "old query updater" > "$vault/.agents/skills/sunday-note-query/scripts/update_query_header.py"
+printf '%s\n' "local query helper" > "$vault/.agents/skills/sunday-note-query/scripts/local.py"
 printf '%s\n' "local ignore" > "$vault/.stignore"
 
 snapshot="$TMP_ROOT/local-content"
@@ -355,6 +356,8 @@ bash "$ROOT/install/install.sh" --vault-root "$vault" --with-paper-summarizer >/
 assert_file_contains "$vault/AGENTS.md" "Agent"
 assert_file_contains "$vault/个人模板/每日记录.md" "local template"
 assert_file_contains "$vault/.agents/skills/sunday-note-query/local.md" "extra skill file"
+test ! -e "$vault/.agents/skills/sunday-note-query/scripts/update_query_header.py" || fail "obsolete query updater remains"
+assert_file_contains "$vault/.agents/skills/sunday-note-query/scripts/local.py" "local query helper"
 assert_file_contains "$vault/.stignore" "local ignore"
 assert_file_contains "$vault/.stignore" "/SundayNoteAgent"
 assert_file_contains "$vault/.stignore" "/.import_files"
@@ -541,5 +544,27 @@ managed = text.split('// END SundayNoteAgent managed ignores')[0]
 assert '/.import_files' in managed
 assert '/个人' not in managed and '/40_个人写作' not in managed
 PY
+
+# Cleanup must reject abnormal targets before any managed content is changed.
+for kind in directory file-link scripts-link skill-link; do
+  guarded="$TMP_ROOT/query-cleanup-$kind"
+  query_dir="$guarded/.agents/skills/sunday-note-query"
+  mkdir -p "$guarded/SundayNoteAgent" "$query_dir/scripts"
+  printf '%s\n' sentinel > "$guarded/AGENTS.md"
+  outside="$TMP_ROOT/query-outside-$kind"
+  mkdir -p "$outside/scripts"
+  printf '%s\n' untouched > "$outside/update_query_header.py"
+  case "$kind" in
+    directory) mkdir "$query_dir/scripts/update_query_header.py" ;;
+    file-link) ln -s "$outside/update_query_header.py" "$query_dir/scripts/update_query_header.py" ;;
+    scripts-link) rmdir "$query_dir/scripts"; ln -s "$outside" "$query_dir/scripts" ;;
+    skill-link) rmdir "$query_dir/scripts" "$query_dir"; ln -s "$outside" "$query_dir" ;;
+  esac
+  if bash "$ROOT/install/install.sh" --vault-root "$guarded" >"$TMP_ROOT/cleanup-$kind.out" 2>&1; then
+    fail "abnormal query cleanup target accepted: $kind"
+  fi
+  assert_file_contains "$guarded/AGENTS.md" sentinel
+  assert_file_contains "$outside/update_query_header.py" untouched
+done
 
 echo "install fixture passed"
