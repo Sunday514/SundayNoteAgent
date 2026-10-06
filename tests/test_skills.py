@@ -9,7 +9,6 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 CORE_SKILLS = (
-    "sunday-note-context",
     "sunday-note-ingest",
     "sunday-note-lint",
     "sunday-note-query",
@@ -50,17 +49,6 @@ def main() -> None:
 
         if skill_name == "sunday-note-lint":
             assert frontmatter["description"] == LINT_DESCRIPTION, skill_file
-
-        if skill_name == "sunday-note-context":
-            # These headings are the exported document structure.
-            sections = ("兴趣与经验", "价值取舍", "证据与知识演化", "判断与协作", "表达偏好")
-            assert re.findall(r"^### (.+)$", body, re.MULTILINE) == list(sections), skill_file
-            template = skill_dir / "assets/个人上下文.md"
-            template_body = template.read_text(encoding="utf-8")
-            assert re.findall(r"^## (.+)$", template_body, re.MULTILINE) == list(sections), template
-            # The installer uses this exact heading to preserve personal content.
-            assert len(re.findall(r"^## 个性化响应$", body, re.MULTILINE)) == 1, skill_file
-            assert "[[个人上下文]]" in body, skill_file
 
         # Verify documented resources even when the command includes arguments.
         for relative_path in re.findall(r"`((?:scripts|assets)/[^`\s]+)", body):

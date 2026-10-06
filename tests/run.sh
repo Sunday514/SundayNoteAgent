@@ -17,5 +17,6 @@ python "$ROOT/tests/test_query.py"
 python "$ROOT/tests/test_monitor.py"
 python "$ROOT/tests/test_knowledge_delta.py"
 python "$ROOT/tests/test_python_tools.py"
+python "$ROOT/tests/test_plugin.py"
 
 echo "All regression checks passed."

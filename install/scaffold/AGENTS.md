@@ -37,4 +37,4 @@
 - 临时图片放在 `.import_files/`。长期图像按安装模式保留来源分区，Markdown 使用相对路径，默认显示宽度 640。
 - 行内公式使用 `$...$`，块级公式使用独立的 `$$...$$`。
 - `.obsidian/` 仅由安装器按所选模板模式维护 Daily Notes、Calendar 和 QuickAdd 的项目字段；其他设置、会话、workspace、设备路径、环境变量和代理属于本地状态。
-- 根规则、已安装工具和托管模板修改对应的 `SundayNoteAgent/` 源文件后，通过安装器刷新。
+- 根规则、插件和托管模板从 SundayNoteAgent 源码安装更新；源码不要求位于 vault 内。`SundayNoteTools/quickadd/` 是 Obsidian 所需的托管脚本，不在此处开发。

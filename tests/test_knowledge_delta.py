@@ -663,6 +663,30 @@ class ContractTests(unittest.TestCase):
             self.assertEqual(source.read_text(encoding="utf-8"), "原文")
 
 
+def test_plugin_deployment_identity_and_snapshot():
+    with tempfile.TemporaryDirectory(dir="/tmp") as temp:
+        base = Path(temp)
+        vault, package, run = base / "vault", base / "plugin", base / "run"
+        kdv.copy_tree_strict(FIXTURE / "vault", vault)
+        package.mkdir()
+        (vault / ".agents/skills").rename(package / "skills")
+        (package / "build.json").write_text('{}')
+        run.mkdir()
+        before = kdv.hash_vault_scope(vault)
+        manifest = kdv.prepare_run(FIXTURE / "smoke-suite.json", vault, run,
+                                   FIXTURE / "agent-source", package)
+        assert manifest["system_identity"]["deployment"] == "plugin"
+        assert before == kdv.hash_vault_scope(vault)
+        assert (run / "snapshot/.agents/skills/sunday-note-query/SKILL.md").is_file()
+        (package / "skills/sunday-note-query/SKILL.md").write_text("changed")
+        try:
+            kdv.bind_system_identity(FIXTURE / "agent-source", vault, package)
+        except kdv.DiagnosticError:
+            pass
+        else:
+            raise AssertionError("mismatched plugin deployment was accepted")
+
+
 def main() -> None:
     suite = unittest.TestSuite(unittest.FunctionTestCase(value) for name, value in globals().items()
                                if name.startswith("test_") and callable(value))

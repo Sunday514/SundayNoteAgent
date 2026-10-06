@@ -94,7 +94,7 @@ assert_file_contains "$vault/.stignore" "/.import_files"
 assert_same_file "$TMP_ROOT/personal-stignore" "$vault/.stignore"
 { cat "$ROOT/install/scaffold/AGENTS.md"; printf '\n'; cat "$ROOT/install/scaffold/personal.md"; } > "$TMP_ROOT/personal-agents.md"
 assert_same_file "$TMP_ROOT/personal-agents.md" "$vault/AGENTS.md"
-assert_same_file "$ROOT/skills/sunday-note-context/assets/个人上下文.md" "$vault/个人上下文.md"
+assert_same_file "$ROOT/install/scaffold/个人上下文.md" "$vault/个人上下文.md"
 
 assert_same_file "$ROOT/templates/每周记录.md" "$vault/个人模板/每周记录.md"
 assert_file_contains "$vault/个人模板/每周记录.md" "value-week={{title}}"
@@ -105,7 +105,7 @@ assert_file_contains "$vault/个人模板/每月记录.md" "## 记录"
 assert_source_tree_exported "$ROOT/skills/sunday-note-ingest" "$vault/.agents/skills/sunday-note-ingest"
 assert_source_tree_exported "$ROOT/skills/sunday-note-lint" "$vault/.agents/skills/sunday-note-lint"
 assert_source_tree_exported "$ROOT/skills/sunday-note-query" "$vault/.agents/skills/sunday-note-query"
-assert_source_tree_exported "$ROOT/skills/sunday-note-context" "$vault/.agents/skills/sunday-note-context"
+[ ! -f "$vault/.agents/skills/sunday-note-context/SKILL.md" ] || fail "retired Context skill exported"
 
 integrated="$TMP_ROOT/integrated"
 mkdir -p \
@@ -180,8 +180,8 @@ assert_file_contains "$quickadd_data" '"id": "custom-choice"'
 assert_file_contains "$quickadd_data" '"localSetting": "preserve-me"'
 assert_file_contains "$quickadd_data" '"name": "统计本周打卡"'
 assert_file_contains "$quickadd_data" '"name": "刷新每月统计"'
-assert_file_contains "$quickadd_data" '"path": "SundayNoteAgent/automation/quickadd/rollup.js"'
-assert_same_file "$ROOT/automation/quickadd/rollup.js" "$integrated/SundayNoteAgent/automation/quickadd/rollup.js"
+assert_file_contains "$quickadd_data" '"path": "SundayNoteTools/quickadd/rollup.js"'
+assert_same_file "$ROOT/automation/quickadd/rollup.js" "$integrated/SundayNoteTools/quickadd/rollup.js"
 if grep -Fq -- '过期' "$quickadd_data"; then
   fail "installer preserved a stale managed QuickAdd choice"
 fi
@@ -204,7 +204,7 @@ assert names.count("统计本周打卡") == 1
 assert names.count("刷新每月统计") == 1
 assert "custom-choice" in ids
 ' "$quickadd_data" || fail "managed choices were duplicated or a parent choice was removed"
-test "$(grep -Fc -- '"path": "SundayNoteAgent/automation/quickadd/rollup.js"' "$quickadd_data")" -eq 2 || fail "QuickAdd choices do not use the visible project script"
+test "$(grep -Fc -- '"path": "SundayNoteTools/quickadd/rollup.js"' "$quickadd_data")" -eq 2 || fail "QuickAdd choices do not use the managed scripts"
 
 cp "$calendar_data" "$TMP_ROOT/calendar.after-first.json"
 cp "$quickadd_data" "$TMP_ROOT/quickadd.after-first.json"
@@ -351,7 +351,14 @@ assert_local_content_unchanged() {
   assert_same_file "$snapshot/personal-context" "$vault/个人上下文.md"
 }
 
+mkdir -p "$vault/.agents/skills/sunday-note-context/assets"
+printf '%s\n' 'retired skill' > "$vault/.agents/skills/sunday-note-context/SKILL.md"
+printf '%s\n' 'retired template' > "$vault/.agents/skills/sunday-note-context/assets/个人上下文.md"
+printf '%s\n' 'user attachment' > "$vault/.agents/skills/sunday-note-context/local.md"
 bash "$ROOT/install/install.sh" --vault-root "$vault" --with-paper-summarizer >/dev/null
+test ! -f "$vault/.agents/skills/sunday-note-context/SKILL.md" || fail "retired skill remains"
+test ! -f "$vault/.agents/skills/sunday-note-context/assets/个人上下文.md" || fail "retired asset remains"
+assert_file_contains "$vault/.agents/skills/sunday-note-context/local.md" 'user attachment'
 
 assert_file_contains "$vault/AGENTS.md" "Agent"
 assert_file_contains "$vault/个人模板/每日记录.md" "local template"
@@ -366,7 +373,7 @@ assert_local_content_unchanged
 assert_source_tree_exported "$ROOT/skills/sunday-note-ingest" "$vault/.agents/skills/sunday-note-ingest"
 assert_source_tree_exported "$ROOT/skills/sunday-note-lint" "$vault/.agents/skills/sunday-note-lint"
 assert_source_tree_exported "$ROOT/skills/sunday-note-query" "$vault/.agents/skills/sunday-note-query"
-assert_source_tree_exported "$ROOT/skills/sunday-note-context" "$vault/.agents/skills/sunday-note-context"
+[ ! -f "$vault/.agents/skills/sunday-note-context/SKILL.md" ] || fail "retired Context skill exported"
 assert_source_tree_exported "$ROOT/skills/paper-summarizer" "$vault/.agents/skills/paper-summarizer"
 assert_same_file "$ROOT/templates/每周记录.md" "$vault/个人模板/每周记录.md"
 assert_same_file "$ROOT/templates/每月记录.md" "$vault/个人模板/每月记录.md"

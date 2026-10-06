@@ -1,6 +1,7 @@
 // 工具源码由 Git 管理，导出工具在各设备本地安装。
 /SundayNoteAgent
 /.agents
+/AGENTS.md
 /.sunday-note-agent
 .git
 

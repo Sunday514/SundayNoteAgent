@@ -1,113 +1,87 @@
-# Sunday Note 安装器
+# 安装、更新与迁移
 
-本文描述当前已实现的安装方式。插件化尚未实现：QuickAdd 仍引用 vault 内的 `SundayNoteAgent/automation/quickadd/`，Monitor 仍由安装器配置。迁移完成前不要直接移动源码目录；后续将保留小型 vault 初始化/更新入口，插件负责工具分发，VPS 服务独立部署。
+知识库能力使用 Codex 本地插件，Monitor 独立在本机安装。源码可以在任意 vault 外目录；运行依赖 Linux、Python 3.11+、Codex 的插件与 Hooks 支持，Monitor 另需 rg、原生队列和 MCP Apps。一个本机配置绑定一个 vault。
 
-在 vault 根目录保留 `SundayNoteAgent/` 源码目录，首次安装选择模式：
+## 安装
 
-```bash
-bash SundayNoteAgent/install/install.sh --vault-root . --mode personal
-# 独立工作知识库
-bash SundayNoteAgent/install/install.sh --vault-root . --mode work
-```
-
-## 两种模式
-
-| 内容 | personal（默认） | work |
-| --- | --- | --- |
-| Raw、日/周/月记录、项目复盘 | `工作/` 与 `个人/` 分区 | 仅 `工作/` |
-| 长期图像 | `assets/工作/figures/`、`assets/个人/figures/` | 仅 `assets/工作/figures/` |
-| Wiki | `30_知识库/`，按主题统一组织 | 同左 |
-| Routine 模板 | `个人模板/`，含日记入口、周/月统计 | `工作模板/`，计划、记录、周/月总结 |
-| 个性化 | context Skill、缺失时创建个人上下文 | 不安装 context Skill、不创建个人上下文 |
-| 写作 | 创建 `40_个人写作/` | 不创建 |
-| QuickAdd | 每日记录、日记、周/月统计 | 仅创建工作每日记录 |
-| Daily Notes / Calendar | 个人日/周记录目录及模板 | 工作日/周记录目录及模板 |
-
-两种模式都创建 `.import_files/`、首页和同步忽略规则，并部署 Ingest、Query、Lint。工作模式的原始材料位于 `10_原始材料/工作/`，项目位于 `23_项目复盘/工作/`。月记录由 Agent 或 Obsidian 模板创建。
-
-模式保存在 vault 本地 `.sunday-note-agent/install-mode`，更新时可省略 `--mode`；没有记录的旧安装默认为个人模式。显式指定模式只改变本次托管配置和之后的安装范围，不删除或迁移已有笔记、模板、首页和额外 Skill。需要纯工作环境时使用独立 vault；已有 `AGENTS.md` 个性化响应段会阻止工作模式安装，以免覆盖或混入个人指令。
-
-## 更新与选项
-
-关闭 Obsidian，更新源码并重新安装，完成后再打开 Obsidian：
+关闭 Obsidian。新 vault 先初始化目录与模板；已有 vault 跳过初始化，迁移默认保留全部模板：
 
 ```bash
-git -C SundayNoteAgent pull --ff-only
-bash SundayNoteAgent/install/install.sh --vault-root .
+bash install/install.sh --vault-root /path/to/vault --mode personal --deployment plugin --install-state /path/to/local/install-mode
+# 独立工作 vault 使用 --mode work
+python3 install/migrate_plugin.py plan --vault-root /path/to/vault --source-target /path/to/SundayNoteAgent
+python3 install/migrate_plugin.py apply --vault-root /path/to/vault --source-target /path/to/SundayNoteAgent --mode personal --with-paper-summarizer
 ```
 
-| 选项 | 行为 |
+已在最终源码目录时，`--source-target "$PWD"`。搬迁时目标目录必须不存在，迁移工具复制完整 Git 和本地文件，保留旧工作区至验收。不要手工删除旧源码再尝试启动新入口。
+
+个人与工作共用一套插件。`--mode` 只决定 vault 布局、模板、同步范围和本机绑定，不参与插件构建或版本计算。
+
+- `personal`：工作与个人 Raw、日/周/月记录、项目和 assets，统一 Wiki，个人模板、写作与可选个人上下文。
+- `work`：仅工作分区及 Wiki、工作日/周/月记录与模板，不创建个人内容。严格隔离使用独立工作 vault。
+- Paper 首次按参数选装，更新保留。远程可加 `--remote-app-id`，仅接受已核实的注册 App ID，不填写网址或凭据；不提供时不影响已有远程连接或本地功能。Monitor 的 Skill、代码、Hooks 和 MCP 均不进入插件。
+
+插件通过官方 `codex plugin marketplace add` 和 `codex plugin add` 安装。首次安装后必须在客户端审阅并信任插件 Hooks，再重载并验证工具发现。代码有独立内容版本，不直接写插件缓存。
+
+`apply` 在修改真实文件前，先用独立临时 Codex home 验证宿主确实发现用于定位 vault 的 `SessionStart` Hook；不复制认证、不调用模型。可单独运行 `check-host`。当前实测 Codex 0.160.0 未发现此插件 Hook，因而会拒绝切换；移出 Monitor 不解决这个独立限制。不能用安装成功或旧 `plugin_hooks` 开关绕过检查。
+
+## 文件职责
+
+| 位置 | 内容 |
 | --- | --- |
-| `--routine-templates managed`（默认） | 创建缺失的 Daily 模板，刷新 Weekly/Monthly 模板；合并已启用 Daily Notes、Calendar 的目录和模板字段 |
-| `--routine-templates preserve` | 不创建或更新模板，保留 Daily Notes、Calendar 设置；QuickAdd 仍按安装模式更新 |
-| `--with-paper-summarizer` | 首次安装论文总结 Skill；已安装后普通更新继续刷新 |
-| `--with-monitor` | 安装或更新 Monitor，包括用户级 Hook/MCP 配置 |
-| `--with-monitor --monitor-only` | 只更新 Monitor，不改变 vault 安装模式、模板和其他工具 |
-| `--without-monitor --monitor-only` | 卸载 Monitor 托管入口，保留日志 |
+| 源码仓库 | Skills、脚本、安装源文件，唯一开发真值 |
+| vault | 笔记、模板、根 AGENTS、`SundayNoteTools/quickadd/` |
+| `$XDG_CONFIG_HOME/sunday-note-agent/` | vault/模式绑定 |
+| `$XDG_STATE_HOME/sunday-note-agent/` | 插件迁移检查点与备份 |
+| `$XDG_DATA_HOME/sunday-note-agent/marketplace/` | 生成的插件发布源，由安装器刷新 |
 
-先自行安装并启用需要的 Obsidian 插件。插件缺失时核心安装仍完成，并报告跳过的集成。保留模板时，QuickAdd 创建每日记录仍要求当前模式的固定路径下已有模板。论文总结使用 Agent 当前可用的 PDF 读取和页面渲染工具，不依赖 Docling 或指定 Conda 环境；缺少阅读能力时说明限制，不自动安装依赖。更新只清理已知废弃脚本和模板（包括 Query 计数脚本），保留旧论文工作区和用户额外文件。查询脚本清理目标或其容器是符号链接、目标是异常目录时，安装停止；先检查本地布局，不强制覆盖。
+未设置 XDG 时分别使用 `~/.config`、`~/.local/state`、`~/.local/share`。这些目录和 Codex 凭据都不进入 vault 或仓库。
 
-## 托管边界
+QuickAdd 按现有 ID 更新本项目入口，保留用户 choices；个人模式提供每日记录、日记与周/月统计，工作模式仅提供工作每日记录。脚本位于可见托管目录，移动或停用 Agent 插件不影响它。缺少 Obsidian 插件时报告跳过，不自动启用。
 
-- 根规则由公共 scaffold 与模式规则组合生成；个人模式保留唯一末尾 `## 个性化响应` 章节，重复标题时停止覆盖。
-- Skills 从源码复制，额外文件保留；工作模式根规则限制只使用工作来源和 Wiki。
-- 首页、Daily 模板、个人上下文和 `.gitignore` 只在缺失时创建；Weekly/Monthly 按所选模板模式更新。已有正文不迁移。
-- QuickAdd 按稳定 ID/名称替换本项目入口，工作模式移除本项目的个人日记和统计入口；用户自有 choices 与其他配置保留。安装器不启用插件。
-- `.stignore` 文件开头的托管段按模式刷新，用户规则保留在后；源码、凭据、日志、导入中间产物和设备状态留在本地。工作模式另外排除所有固定层的 `个人/` 分区、`assets/个人/`、`40_个人写作/`、`个人模板/` 和 `个人上下文.md`；个人模式允许工作与个人内容同步。托管排除优先于用户的包含规则，切换模式只替换托管段。
-- 个人模式需要个性化时，可显式调用 `$sunday-note-context` 初始化；安装器不启动访谈。
+根规则由 scaffold 与模式段生成，保留个人模式末尾唯一的“个性化响应”段。首页、Daily 模板和个人上下文仅在缺失时创建；迁移不覆盖已有 Routine 模板。需要刷新托管 Weekly/Monthly 时显式运行基础安装器，使用相同外置 `--install-state`。
 
-个人周/月统计仅修改已有记录的自动块；打卡项读取 Daily 模板。周统计覆盖 ISO 周的 7 天，月统计汇总周日落在该月的完整周。工作模式不部署这些入口。
+`.stignore` 排除源码、根规则、Skills、缓存、日志和本机配置。QuickAdd 小型脚本与其配置可以同步；各设备分别安装规则和插件。工作模式额外排除个人分区、个人 assets、写作、模板和个人上下文。忽略不删除已同步的文件，开启工作设备同步前先配置范围。
 
-Syncthing 的 `.stignore` 是设备本地文件，各设备需按自身模式安装。排除规则不删除此前已同步的文件；若要求设备从未接收个人资料，应先安装工作模式再启用同步。语法及首条匹配规则见 [Syncthing 官方说明](https://docs.syncthing.net/users/ignoring.html)。
+## 更新、停用与回退
+
+在最终源码目录执行：
+
+```bash
+git pull --ff-only
+python3 install/migrate_plugin.py apply --vault-root /path/to/vault --source-target "$PWD"
+python3 install/migrate_plugin.py status --vault-root /path/to/vault --source-target "$PWD"
+python3 install/migrate_plugin.py disable --vault-root /path/to/vault --source-target "$PWD"
+python3 install/migrate_plugin.py rollback --vault-root /path/to/vault --source-target "$PWD"
+```
+
+`disable` 卸载本机插件注册，保留知识、QuickAdd 和发布源。插件安装、更新与停用均不修改独立 Monitor 的注册、配置、暂停状态或队列。
+
+每次 `apply` 保存精确配置备份和分步 hash 检查点。中断后先查看状态并回退；不会覆盖旧检查点后直接重试。`rollback` 恢复最近一次迁移接管的配置；不属于中断步骤的新修改会阻止回退。中断步骤涉及的文件若内容未确认，先完整保存在备份目录的 `recovery/` 中再恢复原配置，需人工核查这些留存内容（包括可能的用户编辑）。正常迁移完成后的用户修改仍阻止自动回退。源码副本和备份保留，独立 Monitor 不变。
+
+若已有旧插件内的 Monitor 绑定，迁移会停止，要求先按原版本回退并确认独立本地部署；不静默丢弃旧插件的 Monitor 状态。
+
+真实验收后才考虑归档旧源码，并先确认本地 Monitor 的 query 路径不再依赖它。不要随插件清理 `.sunday-note-agent/monitor`、`.logs/codex` 或 Monitor Skill；不要删除 VPS 仍读取的远程规则副本，也不要整目录删除 vault 的 `.agents` 或 `.logs`。
+
+## Monitor 与远程边界
+
+Monitor 是仅本地使用的可选只读旁路，不代替正式 Review，不自动执行建议。使用现有本地安装器单独管理：
+
+```bash
+bash install/install.sh --vault-root /path/to/vault --with-monitor --monitor-only
+bash install/install.sh --vault-root /path/to/vault --without-monitor --monitor-only
+# 已安装实例：status / pause / resume
+python3 /path/to/vault/.sunday-note-agent/monitor/monitor.py --config /path/to/vault/.logs/codex/config.json status
+```
+
+本地部署沿用 `.sunday-note-agent/monitor`、`.agents/skills/sunday-note-monitor` 和 `.logs/codex`，不参与同步。配置中的 `project_roots` 控制监控项目，`reference_roots` 仅控制补充证据；代理保存在本地，不复制认证。独立安装器会启用 Monitor，需要暂停时显式执行 `pause`。队列接受不代表面板已渲染；投递结果不明时不要重复发送。新客户端必须验证工具发现、用户级 Hook 信任和面板。
+
+VPS 继续使用现有服务、认证和受限路径；本机插件不会部署服务或扩大权限。远程 Query/Paper 规则仍按 VPS 原有方式部署，直到独立完成远程迁移。
+
+基础安装器 `--deployment standalone` 仍可用于不使用插件的设备和兼容规则导出；不要在本机插件旁再导出同名知识库 Skills。`configure_monitor.py` 负责独立本地 Monitor，不经插件入口。
 
 ## 验证
 
-在工具仓库运行 `bash tests/run.sh`。测试使用脱敏临时 vault，覆盖两种模式、重复安装、模板保留、插件配置和导出脚本，不读取真实 vault。
+`bash tests/run.sh` 使用脱敏临时目录覆盖现有功能、插件构建、迁移、重复更新、停用与回退。KDI 的 `prepare/all --plugin-root <实际插件缓存目录>` 将实际部署与源码 hash 对照，并冻结对应 Skills；不填时检查 vault 内部署。
 
-## Monitor（可选）
-
-Monitor 是只读会话检查旁路，不参与正常 Query/Ingest，也不替代正式 Review。安装与停用：
-
-```bash
-bash SundayNoteAgent/install/install.sh --vault-root . --with-monitor --monitor-only
-bash SundayNoteAgent/install/install.sh --vault-root . --without-monitor --monitor-only
-```
-
-依赖 Linux、Python 3.11+、rg，以及支持临时会话、忽略用户配置和 permission profile 的 Codex。自动反馈还需要来源 App 状态接口、原生队列和 MCP Apps。只使用 ChatGPT 订阅认证，不复制凭据或回退 API。
-
-安装器合并用户级 Hooks/MCP，部署本项目脚本和面板；其他配置保留。同名未托管 MCP 或冲突的 inline Hooks 会阻止安装。安装后在 Codex `/hooks` 中审阅并信任 Hooks，重新加载客户端 MCP，并验证一次无副作用反馈。卸载移除托管入口、保留日志。当前一个用户配置绑定一个 vault，各设备分别安装。
-
-### 范围与运行状态
-
-本地配置位于 `.logs/codex/config.json`：
-
-- `project_roots`：监控项目，默认绑定 vault；空数组停止采集。同仓库 worktree 按 Git 公共目录识别，独立 clone 不自动放行。
-- `reference_roots`：允许作为补充文件证据的目录，不启用监控，也不是操作系统读取隔离。不要填主目录或文件系统根目录。
-- 配置使用明确绝对路径，更新保留已有选择；日志、建议、队列和状态均属私人数据，不提交或同步。
-
-在 vault 根目录操作：
-
-```bash
-python3 .sunday-note-agent/monitor/monitor.py --config .logs/codex/config.json status
-python3 .sunday-note-agent/monitor/monitor.py --config .logs/codex/config.json pause
-python3 .sunday-note-agent/monitor/monitor.py --config .logs/codex/config.json resume
-python3 .sunday-note-agent/monitor/monitor.py --config .logs/codex/config.json retry
-```
-
-`pause` 不强杀当前检查；`retry` 重试分析队列，不盲目重发投递结果不明的消息。更新会停止旧执行器并迁移待处理队列，保留日志与用户选择。
-
-桌面 Hook 未继承终端代理时，通过安装器设置本地代理；重新安装保留，传空字符串清除：
-
-```bash
-python3 SundayNoteAgent/install/configure_monitor.py --vault-root /path/to/vault --proxy-url 'http://127.0.0.1:<端口>'
-```
-
-### 反馈与故障处理
-
-- 只采集范围内、有持久 transcript 的会话。后台检查沿用来源 Codex 程序；无法识别来源、认证或沙箱失败时保留状态，不自动换模型或程序。
-- 新用户请求使旧待发结果失效；只在来源会话明确空闲、轮次一致时投递。缺少状态通道仍可分析和记录，但不自动推送。
-- 面板“处理”交接任务；“确认”只保存选择、可继续转为处理；“忽略”当前不执行。确认与忽略在后续正常请求中作为上下文交接，不构成自动执行授权。
-- `queued` 仅说明队列接受，不代表面板已渲染；`sending` 或失败需检查状态，不重复投递。工具缺失时重新加载 MCP，不能靠复制完整私人证据到提示词兜底。
-- Git 审查范围未知时报告不完整，不以新 HEAD 补证旧范围；切换仓库不清除原仓库的未知状态。Monitor 建议仍需用户判断。
-
-日常先查看 `status` 的积压和阻塞原因，再检查本地日志。实际模型、委派与证据检查流程以 [Monitor Skill](../skills/sunday-note-monitor/SKILL.md) 和实现为准；此处不复制内部状态机。客户端工具发现、面板渲染和关闭行为需在实际安装后验证。
+机械验证不代表 Hook 已获信任、Obsidian GUI 已完成验收，也不证明知识库整体有效。

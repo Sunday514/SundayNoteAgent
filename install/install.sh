@@ -2,6 +2,8 @@
 set -euo pipefail
 
 PROJECT_DIR_NAME="SundayNoteAgent"
+DEPLOYMENT=standalone
+INSTALL_STATE=""
 VAULT_ROOT=""
 INSTALL_MODE=""
 WITH_PAPER_SUMMARIZER=0
@@ -32,7 +34,9 @@ Usage:
   install.sh --vault-root <vault-dir> --without-monitor --monitor-only
 
 Install or update SundayNoteAgent-managed files from the current checkout.
-Without --vault-root, the vault root is the parent of SundayNoteAgent/.
+--vault-root is required; the checkout may live outside the vault.
+--deployment plugin skips Skill exports (the plugin owns them).
+--install-state FILE stores the installation mode outside the vault.
 The installer creates missing vault-local files and refreshes only managed files and plugin fields.
 Paper summarizer is optional and uses the agent's available PDF reading tools.
 Mode defaults to personal on first install and is remembered for updates.
@@ -44,6 +48,12 @@ USAGE
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
+    --deployment)
+      case "${2:-}" in standalone|plugin) DEPLOYMENT="$2" ;; *) exit 2 ;; esac
+      shift 2 ;;
+    --install-state)
+      INSTALL_STATE="${2:?missing install state path}"
+      shift 2 ;;
     --mode)
       [ "$#" -ge 2 ] || { echo "missing value for --mode" >&2; exit 2; }
       case "$2" in personal|work) INSTALL_MODE="$2" ;; *) echo "invalid mode: $2" >&2; exit 2 ;; esac
@@ -111,7 +121,8 @@ if [ -n "$VAULT_ROOT" ]; then
   fi
   VAULT_ROOT="$(cd -- "$VAULT_ROOT" && pwd)"
 else
-  VAULT_ROOT="$(cd -- "$SOURCE_ROOT/.." && pwd)"
+  echo "--vault-root is required" >&2
+  exit 2
 fi
 
 configure_monitor() {
@@ -126,7 +137,7 @@ if [ "$MONITOR_ONLY" -eq 1 ]; then
   exit 0
 fi
 
-mode_file="$VAULT_ROOT/.sunday-note-agent/install-mode"
+mode_file="${INSTALL_STATE:-$VAULT_ROOT/.sunday-note-agent/install-mode}"
 if [ -z "$INSTALL_MODE" ]; then
   if [ -f "$mode_file" ]; then INSTALL_MODE="$(< "$mode_file")"; else INSTALL_MODE=personal; fi
 fi
@@ -137,8 +148,6 @@ CORE_SKILLS=(sunday-note-ingest sunday-note-lint sunday-note-query)
 if [ "$INSTALL_MODE" = work ]; then
   TEMPLATE_DIR=工作模板
   TEMPLATE_SOURCE="$SOURCE_ROOT/templates/work"
-else
-  CORE_SKILLS+=(sunday-note-context)
 fi
 
 require_source_file() {
@@ -318,7 +327,7 @@ ensure_personal_context_file() {
     return
   fi
 
-  cp -- "$SOURCE_ROOT/skills/sunday-note-context/assets/个人上下文.md" "$target"
+  cp -- "$SCAFFOLD_DIR/个人上下文.md" "$target"
 }
 
 ensure_syncthing_ignores() {
@@ -380,15 +389,10 @@ fi
 require_source_dir "$SOURCE_ROOT/automation/quickadd"
 for skill in "${CORE_SKILLS[@]}"; do require_source_dir "$SOURCE_ROOT/skills/$skill"; done
 if [ "$INSTALL_MODE" = personal ]; then
-  require_source_file "$SOURCE_ROOT/skills/sunday-note-context/assets/个人上下文.md"
+  require_source_file "$SCAFFOLD_DIR/个人上下文.md"
 fi
 if [ "$install_paper_summarizer" -eq 1 ]; then
   require_source_dir "$SOURCE_ROOT/skills/paper-summarizer"
-fi
-
-if [ ! -d "$VAULT_ROOT/$PROJECT_DIR_NAME" ]; then
-  echo "missing $PROJECT_DIR_NAME directory under vault root: $VAULT_ROOT" >&2
-  exit 1
 fi
 
 if command -v python3 >/dev/null 2>&1; then
@@ -401,6 +405,11 @@ preflight_container_dir "$VAULT_ROOT/.agents"
 preflight_container_dir "$VAULT_ROOT/.agents/skills"
 preflight_container_dir "$VAULT_ROOT/.sunday-note-agent"
 preflight_managed_file "$mode_file"
+preflight_container_dir "$VAULT_ROOT/SundayNoteTools"
+preflight_container_dir "$VAULT_ROOT/SundayNoteTools/quickadd"
+for script in "$SOURCE_ROOT"/automation/quickadd/*.js; do
+  preflight_managed_file "$VAULT_ROOT/SundayNoteTools/quickadd/${script##*/}"
+done
 
 preflight_managed_file "$VAULT_ROOT/AGENTS.md"
 preflight_local_file "$VAULT_ROOT/首页.md"
@@ -415,6 +424,8 @@ if [ "$ROUTINE_TEMPLATES_MODE" = managed ]; then
 fi
 
 for skill in "${CORE_SKILLS[@]}"; do preflight_managed_dir "$VAULT_ROOT/.agents/skills/$skill"; done
+preflight_container_dir "$VAULT_ROOT/.agents/skills/sunday-note-context"
+preflight_container_dir "$VAULT_ROOT/.agents/skills/sunday-note-context/assets"
 query_skill="$VAULT_ROOT/.agents/skills/sunday-note-query"
 preflight_container_dir "$query_skill"
 preflight_container_dir "$query_skill/scripts"
@@ -443,6 +454,11 @@ else
 fi
 if [ "$INSTALL_MODE" = personal ]; then ensure_personal_context_file; fi
 
+copy_managed_dir "$SOURCE_ROOT/automation/quickadd" "$VAULT_ROOT/SundayNoteTools/quickadd"
+if [ "$DEPLOYMENT" = standalone ]; then
+# 移除已停用 Skill 的已知托管文件，保留目录中额外的用户文件。
+rm -f -- "$VAULT_ROOT/.agents/skills/sunday-note-context/SKILL.md" \
+  "$VAULT_ROOT/.agents/skills/sunday-note-context/assets/个人上下文.md"
 for skill in "${CORE_SKILLS[@]}"; do
   copy_managed_dir "$SOURCE_ROOT/skills/$skill" "$VAULT_ROOT/.agents/skills/$skill"
 done
@@ -456,6 +472,7 @@ if [ "$install_paper_summarizer" -eq 1 ]; then
     "$paper_skill_path/scripts/docling_parser.py" \
     "$paper_skill_path/scripts/prepare_paper_summary.py" \
     "$paper_skill_path/scripts/validate_summary.py"
+fi
 fi
 
 if [ -n "$OPTIONAL_CONFIG_PYTHON" ]; then
@@ -471,7 +488,7 @@ else
   echo "可选工作流未配置：QuickAdd Routine 自动化（未找到 python3 或 python；核心安装已完成）。"
 fi
 echo "Installed or updated Sunday Note vault at: $VAULT_ROOT"
-mkdir -p "$VAULT_ROOT/.sunday-note-agent"
+mkdir -p "$(dirname -- "$mode_file")"
 printf '%s\n' "$INSTALL_MODE" > "$mode_file"
 echo "安装模式：$INSTALL_MODE"
 if [ -n "$MONITOR_MODE" ]; then configure_monitor; fi

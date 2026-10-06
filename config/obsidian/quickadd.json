@@ -13,7 +13,7 @@
             "id": "sunday-note-create-diary-script",
             "name": "create_or_open_diary",
             "type": "UserScript",
-            "path": "SundayNoteAgent/automation/quickadd/create_or_open_diary.js"
+            "path": "SundayNoteTools/quickadd/create_or_open_diary.js"
           }
         ]
       },
@@ -32,7 +32,7 @@
             "id": "sunday-note-create-daily-script",
             "name": "create_daily",
             "type": "UserScript",
-            "path": "SundayNoteAgent/automation/quickadd/create_daily.js"
+            "path": "SundayNoteTools/quickadd/create_daily.js"
           }
         ]
       },
@@ -51,7 +51,7 @@
             "id": "sunday-note-rollup-week-script",
             "name": "rollup",
             "type": "UserScript",
-            "path": "SundayNoteAgent/automation/quickadd/rollup.js",
+            "path": "SundayNoteTools/quickadd/rollup.js",
             "settings": {
               "period": "week"
             }
@@ -73,7 +73,7 @@
             "id": "sunday-note-rollup-month-script",
             "name": "rollup",
             "type": "UserScript",
-            "path": "SundayNoteAgent/automation/quickadd/rollup.js",
+            "path": "SundayNoteTools/quickadd/rollup.js",
             "settings": {
               "period": "month"
             }

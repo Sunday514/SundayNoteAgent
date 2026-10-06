@@ -39,7 +39,7 @@ SYSTEM_FILES = ("AGENTS.md", "首页.md", "个人上下文.md")
 SYSTEM_DIRS = tuple(sorted(ALLOWED_SOURCE_ROOTS))
 KNOWLEDGE_SKILL_DIRS = tuple(
     f".agents/skills/{name}"
-    for name in ("sunday-note-context", "sunday-note-ingest", "sunday-note-lint", "sunday-note-query")
+    for name in ("sunday-note-ingest", "sunday-note-lint", "sunday-note-query")
 )
 CORE_SKILLS = tuple(Path(path).name for path in KNOWLEDGE_SKILL_DIRS)
 QUERY_GROUPS = ("G", "O", "S")
@@ -461,7 +461,7 @@ def git_identity(agent_source: Path) -> dict[str, Any]:
     return {"revision": revision, "dirty": dirty}
 
 
-def bind_system_identity(agent_source: Path, vault_root: Path) -> dict[str, Any]:
+def bind_system_identity(agent_source: Path, vault_root: Path, plugin_root: Path | None = None) -> dict[str, Any]:
     agent_source = agent_source.resolve(strict=True)
     if not agent_source.is_dir():
         raise DiagnosticError("agent-source must be a directory")
@@ -469,7 +469,7 @@ def bind_system_identity(agent_source: Path, vault_root: Path) -> dict[str, Any]
     mismatches: list[str] = []
     for name in CORE_SKILLS:
         source = agent_source / "skills" / name
-        deployed = vault_root / ".agents" / "skills" / name
+        deployed = (plugin_root / "skills" if plugin_root else vault_root / ".agents" / "skills") / name
         if not source.is_dir() or not deployed.is_dir():
             raise DiagnosticError(f"missing source or deployed Skill: {name}")
         source_hash = hash_tree(source)
@@ -490,6 +490,8 @@ def bind_system_identity(agent_source: Path, vault_root: Path) -> dict[str, Any]
     personal = vault_root / "个人上下文.md"
     return {
         "git": git_identity(agent_source),
+        "deployment": "plugin" if plugin_root else "standalone",
+        "plugin_hash": hash_tree(plugin_root) if plugin_root else None,
         "skills": skills,
         "managed_agents_hash": sha256_file(scaffold),
         "deployed_agents_hash": sha256_file(deployed_agents),
@@ -502,21 +504,32 @@ def prepare_run(
     vault_root: Path,
     run_dir: Path,
     agent_source: Path | None = None,
+    plugin_root: Path | None = None,
 ) -> dict[str, Any]:
     vault_root = vault_root.resolve(strict=True)
     if not vault_root.is_dir():
         raise DiagnosticError("vault-root must be a directory")
     suite = validate_suite(load_json(suite_path), vault_root)
     source_root = agent_source or Path(__file__).resolve().parents[1]
-    system_identity = bind_system_identity(source_root, vault_root)
+    if plugin_root:
+        plugin_root = plugin_root.resolve(strict=True)
+    system_identity = bind_system_identity(source_root, vault_root, plugin_root)
     before_hash = hash_vault_scope(vault_root)
     snapshot = run_dir / "snapshot"
     snapshot_vault(vault_root, snapshot)
     if hash_vault_scope(vault_root) != before_hash:
         raise DiagnosticError("vault changed while the input snapshot was being frozen")
-    snapshot_hash = hash_tree(snapshot)
-    if snapshot_hash != before_hash:
+    if hash_tree(snapshot) != before_hash:
         raise DiagnosticError("frozen snapshot does not match the protected vault scope")
+    if plugin_root:
+        for name in system_identity["skills"]:
+            destination = snapshot / ".agents/skills" / name
+            if destination.exists():
+                raise DiagnosticError("duplicate vault and plugin Skill deployment")
+            copy_tree_strict(plugin_root / "skills" / name, destination)
+        if hash_tree(plugin_root) != system_identity["plugin_hash"]:
+            raise DiagnosticError("plugin changed during snapshot")
+    snapshot_hash = hash_tree(snapshot)
     create_attempt(run_dir, suite, snapshot, "attempt-001")
     manifest = {
         "format": "knowledge-delta-run-v2",
@@ -1637,6 +1650,7 @@ def build_parser() -> argparse.ArgumentParser:
     prepare.add_argument("--vault-root", type=Path, required=True)
     prepare.add_argument("--run-dir", type=Path, required=True)
     prepare.add_argument("--agent-source", type=Path, default=Path(__file__).resolve().parents[1])
+    prepare.add_argument("--plugin-root", type=Path, help="实际已安装的插件目录；不传时校验 vault 内部署")
 
     for name in ("run", "judge"):
         stage = subparsers.add_parser(name, help=f"{name} the prepared diagnostic")
@@ -1665,6 +1679,7 @@ def build_parser() -> argparse.ArgumentParser:
     all_cmd.add_argument("--vault-root", type=Path, required=True)
     all_cmd.add_argument("--run-dir", type=Path, required=True)
     all_cmd.add_argument("--agent-source", type=Path, default=Path(__file__).resolve().parents[1])
+    all_cmd.add_argument("--plugin-root", type=Path)
     all_cmd.add_argument("--model", required=True)
     all_cmd.add_argument("--reasoning-effort", choices=("low", "medium", "high"), default="medium")
     all_cmd.add_argument("--auth-file", type=Path, default=Path(os.environ.get("CODEX_HOME", str(Path.home() / ".codex"))) / "auth.json")
@@ -1679,7 +1694,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         if args.command == "prepare":
             run_dir = ensure_run_dir(args.run_dir, resume=False)
-            prepare_run(args.suite, args.vault_root, run_dir, args.agent_source)
+            prepare_run(args.suite, args.vault_root, run_dir, args.agent_source, args.plugin_root)
             print(f"prepared: {run_dir}")
         elif args.command == "run":
             run_dir = ensure_run_dir(args.run_dir, resume=True)
@@ -1722,7 +1737,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"cleaned: {target}")
         else:
             run_dir = ensure_run_dir(args.run_dir, resume=False)
-            prepare_run(args.suite, args.vault_root, run_dir, args.agent_source)
+            prepare_run(args.suite, args.vault_root, run_dir, args.agent_source, args.plugin_root)
             codex_bin = find_codex_binary(args.codex_bin)
             run_candidates(
                 run_dir,

@@ -12,7 +12,7 @@ const rollup = require(path.join(root, "automation/quickadd/rollup.js"));
 const createDaily = require(path.join(root, "automation/quickadd/create_daily.js"));
 const createDiary = require(path.join(root, "automation/quickadd/create_or_open_diary.js"));
 for (const choice of JSON.parse(repoText("config/obsidian/quickadd.json")).choices) {
-  assert.ok(fs.existsSync(path.join(root, choice.macro.commands[0].path.replace(/^SundayNoteAgent\//, ""))));
+  assert.ok(fs.existsSync(path.join(root, choice.macro.commands[0].path.replace(/^SundayNoteTools\//, "automation/"))));
 }
 
 function file(pathname) {
