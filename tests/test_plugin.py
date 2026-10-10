@@ -1,5 +1,4 @@
 """插件构建、迁移和停用的脱敏回归；不调用模型或真实用户配置。"""
-import importlib.util
 import json
 import os
 from pathlib import Path
@@ -14,9 +13,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "install"))
 import build_plugin as builder
 import migrate_plugin as migration
-from plugin_host import require_capabilities
 from monitor import read_json
-from configure_monitor import stop_workers, configure_mcp
+from configure_monitor import configure_mcp
 
 
 class PluginTests(unittest.TestCase):
@@ -29,13 +27,10 @@ class PluginTests(unittest.TestCase):
             "XDG_DATA_HOME": str(self.root / "data"), "XDG_STATE_HOME": str(self.root / "state"),
             "CODEX_HOME": str(self.root / "codex")})
         self.env.start()
-        self.host = patch.object(migration, "preflight")
-        self.host.start()
         self.calls = []
 
     def tearDown(self):
         self.env.stop()
-        self.host.stop()
         self.temp.cleanup()
 
     def install_old(self):
@@ -69,19 +64,20 @@ class PluginTests(unittest.TestCase):
     def test_package_options_and_no_private_material(self):
         for paper in (False, True):
             output = self.root / str(paper)
-            package = builder.build(output, paper, "plugin_asdk_app_example")
+            package = builder.build(output, paper, "asdk_app_example")
+            self.assertEqual(read_json(package / ".app.json")["apps"]["sundaynote-vps"]["id"], "asdk_app_example")
             self.assertEqual((package / "skills/paper-summarizer").exists(), paper)
             self.assertNotIn("mode", read_json(package / "build.json"))
             self.assertFalse((package / "skills/sunday-note-context").exists())
             self.assertFalse((package / "skills/skill-validation").exists())
             self.assertEqual((package / "skills/sunday-note-query/SKILL.md").read_bytes(),
                              (ROOT / "skills/sunday-note-query/SKILL.md").read_bytes())
-            hooks = read_json(package / "hooks/hooks.json")["hooks"]
-            self.assertEqual(set(hooks), {"SessionStart"})
+            self.assertFalse((package / "hooks").exists())
+            self.assertFalse((package / "plugin").exists())
             self.assertFalse((package / "automation").exists())
+            self.assertFalse((package / "remote").exists())
             self.assertFalse((package / "skills/sunday-note-monitor").exists())
             self.assertFalse((package / "mcp.json").exists())
-            self.assertIn("${PLUGIN_ROOT}", hooks["SessionStart"][0]["hooks"][0]["command"])
             self.assertFalse((package / ".git").exists())
             with self.assertRaises(ValueError):
                 builder.build(output)
@@ -90,19 +86,6 @@ class PluginTests(unittest.TestCase):
         first = builder.build(self.root / "first")
         second = builder.build(self.root / "second")
         self.assertEqual(migration.fingerprint(first), migration.fingerprint(second))
-
-    def test_missing_plugin_hooks_stops_before_mutation(self):
-        self.install_old()
-        plan = migration.inspect(self.vault, ROOT)
-        before = migration.fingerprint(self.vault)
-        migration.preflight.side_effect = ValueError("missing plugin hooks")
-        with self.assertRaisesRegex(ValueError, "missing plugin hooks"):
-            migration.apply(plan)
-        self.assertEqual(before, migration.fingerprint(self.vault))
-        self.assertFalse((self.root / "state/sunday-note-agent/migration.json").exists())
-        with self.assertRaisesRegex(ValueError, "未发现插件 Hooks"):
-            require_capabilities({}, [])
-        require_capabilities({}, [{"pluginId": migration.PLUGIN_ID, "eventName": "sessionStart"}])
 
     def test_reject_symlink_and_nested_source(self):
         link = self.root / "link"
@@ -177,21 +160,6 @@ class PluginTests(unittest.TestCase):
                     self.assertEqual((transaction / "recovery/0/existing.txt").read_text(),
                                      "unconfirmed content")
 
-    def test_scope_preserved_on_install_and_update(self):
-        self.install_old()
-        old = self.vault / ".logs/codex/config.json"
-        migration.atomic(old, {"project_roots": []})
-        with patch.object(migration, "run", self.fake_run):
-            migration.apply(migration.inspect(self.vault, ROOT))
-            config = self.root / "config/sunday-note-agent/config.json"
-            binding = read_json(config)
-            self.assertNotIn("monitor_config", binding)
-            self.assertEqual(read_json(old)["project_roots"], [])
-            migration.atomic(old, {"project_roots": [str(self.root / "other-project")]})
-            migration.apply(migration.inspect(self.vault, ROOT))
-            self.assertEqual(read_json(old)["project_roots"],
-                             [str(self.root / "other-project")])
-
     def test_interrupted_rollback_rejects_unrelated_edit(self):
         config, state, _ = migration.locations()
         target, unrelated = self.root / "target", self.root / "unrelated"
@@ -212,49 +180,6 @@ class PluginTests(unittest.TestCase):
             migration.rollback(state)
         self.assertEqual(unrelated.read_text(), "user edit")
 
-    def test_stop_source_worker_by_bound_runtime(self):
-        _, state, _ = migration.locations()
-        runtime = state / "monitor"
-        runtime.mkdir(parents=True)
-        script = self.root / "source/monitor.py"
-        script.parent.mkdir()
-        script.write_text("import time\ntime.sleep(60)\n")
-        own = subprocess.Popen([sys.executable, str(script), "--config", str(runtime / "runtime.json"), "work"])
-        other = subprocess.Popen([sys.executable, str(script), "--config", str(self.root / "other.json"), "work"])
-        try:
-            stop_workers(None, runtime, config_path=runtime / "runtime.json")
-            own.wait(timeout=5)
-            self.assertIsNone(other.poll())
-            self.assertFalse(read_json(runtime / "state.json")["enabled"])
-        finally:
-            for proc in (own, other):
-                if proc.poll() is None:
-                    proc.terminate()
-                proc.wait(timeout=5)
-
-    def test_old_bundled_monitor_requires_explicit_separation(self):
-        plan = migration.inspect(self.vault, ROOT)
-        plan["binding"] = {"monitor": True}
-        with self.assertRaisesRegex(ValueError, "独立安装本地 Monitor"):
-            migration.apply(plan)
-        self.assertFalse((self.root / "state/sunday-note-agent/migration.json").exists())
-
-    def test_runtime_stdio_and_context(self):
-        package = builder.build(self.root / "package")
-        config_dir, state_dir, _ = migration.locations()
-        for mode in ("personal", "work"):
-            migration.atomic(config_dir / "config.json", {"vault": str(self.vault), "mode": mode,
-                             "state_dir": str(state_dir)})
-            result = subprocess.run([sys.executable, str(package / "plugin/entry.py"), "context"],
-                                    capture_output=True, text=True, check=True)
-            self.assertIn(str(self.vault), result.stdout)
-            self.assertIn(mode, result.stdout)
-        result = subprocess.run([sys.executable, str(package / "plugin/entry.py"), "mcp"],
-                                capture_output=True, text=True)
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("独立本地安装", result.stderr)
-        self.assertFalse((self.vault / ".logs").exists())
-
     @unittest.skipUnless(shutil.which("codex"), "Codex CLI unavailable")
     def test_codex_install_update_remove_without_model(self):
         home = self.root / "codex"
@@ -267,7 +192,7 @@ class PluginTests(unittest.TestCase):
             return json.loads(result.stdout)
         cli("marketplace", "add", str(market))
         first = cli("add", migration.PLUGIN_ID)
-        self.assertTrue((Path(first["installedPath"]) / "plugin/entry.py").is_file())
+        self.assertTrue((Path(first["installedPath"]) / "skills/sunday-note-query/SKILL.md").is_file())
         shutil.rmtree(market)
         builder.build(market, paper=True)
         second = cli("add", migration.PLUGIN_ID)

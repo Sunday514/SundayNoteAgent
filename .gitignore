@@ -7,3 +7,6 @@
 .claude/
 __pycache__/
 *.py[cod]
+node_modules/
+remote/.env
+remote/workspaces.json

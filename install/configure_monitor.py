@@ -22,18 +22,14 @@ MCP_BEGIN = "# BEGIN " + MARKER + " MCP\n"
 MCP_END = "# END " + MARKER + " MCP\n"
 
 
-def stop_workers(runtime, root, config_path=None):
+def stop_workers(runtime, root):
     state = read_json(root / "state.json", {})
     atomic(root / "state.json", {**state, "enabled": False})
     processes = []
     for proc in Path("/proc").glob("[0-9]*"):
         try:
             args = (proc / "cmdline").read_bytes().decode().split("\0")
-            matches_runtime = runtime is not None and str(runtime / "monitor.py") in args
-            matches_config = (config_path is not None and "--config" in args
-                              and args[args.index("--config") + 1:][:1] == [str(config_path)]
-                              and any(Path(a).name == "monitor.py" for a in args))
-            if (matches_runtime or matches_config) and "work" in args:
+            if str(runtime / "monitor.py") in args and "work" in args:
                 os.kill(int(proc.name), signal.SIGTERM)
                 processes.append(proc)
         except (OSError, UnicodeError):

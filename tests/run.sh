@@ -8,6 +8,9 @@ export PYTHONIOENCODING=utf-8
 bash -n "$ROOT/install/install.sh" "$ROOT/tests/test_install.sh"
 node --check "$ROOT/automation/quickadd/rollup.js"
 node --check "$ROOT/tests/test_rollup.js"
+node --check "$ROOT/remote/server.mjs"
+node --check "$ROOT/remote/sandbox.mjs"
+npm --prefix "$ROOT/remote" test
 
 bash "$ROOT/tests/test_install.sh"
 node "$ROOT/tests/test_rollup.js"

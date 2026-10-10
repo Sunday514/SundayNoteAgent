@@ -1,0 +1,20 @@
+{
+  "name": "sundaynote-sandbox",
+  "version": "3.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node --test test_sandbox.mjs test_server.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/server": "2.3.1",
+    "@modelcontextprotocol/node": "2.1.1",
+    "@modelcontextprotocol/express": "2.0.2",
+    "express": "5.2.1",
+    "zod": "4.6.5"
+  }
+}

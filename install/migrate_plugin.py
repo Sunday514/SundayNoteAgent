@@ -15,7 +15,6 @@ sys.dont_write_bytecode = True
 from build_plugin import CORE
 from configure_monitor import safe_path
 from monitor import atomic, read_json
-from plugin_host import preflight
 
 SOURCE = Path(__file__).resolve().parents[1]
 PLUGIN_ID = "sunday-note-agent@sunday-note-local"
@@ -67,7 +66,7 @@ def targets(vault, codex_home, config_dir, data_dir):
     return [config_dir / "config.json", config_dir / "install-mode", data_dir / "marketplace",
             codex_home / "config.toml",
             vault / "AGENTS.md", vault / ".stignore", vault / "SundayNoteTools",
-            *[vault / ".obsidian" / p for p in ("plugins/quickadd/data.json",)],
+            vault / ".obsidian/plugins/quickadd/data.json",
             *[vault / ".agents/skills" / name for name in (*CORE, "sunday-note-context", "paper-summarizer")]]
 
 
@@ -147,11 +146,8 @@ def apply(plan, paper=False, remote_app_id=None):
         if old["phase"] not in ("installed", "rolled_back"):
             raise ValueError("上次迁移未完成；先按 status 核查并 rollback，不覆盖检查点")
     previous = plan["binding"]
-    if previous.get("monitor"):
-        raise ValueError("旧插件绑定包含 Monitor；请先回退旧插件并独立安装本地 Monitor，保留其状态后再迁移。")
     options = {"paper": paper or previous.get("paper", False) or (vault / ".agents/skills/paper-summarizer").exists(),
                "remote_app_id": remote_app_id or previous.get("remote_app_id")}
-    preflight(options["paper"])
     if source_target != SOURCE:
         if source_target.exists():
             raise ValueError("目标源码目录已存在；请从该目录执行更新，或核查冲突")
@@ -194,7 +190,7 @@ def apply(plan, paper=False, remote_app_id=None):
         atomic(transaction / "journal.json", journal)
         raise
     print(json.dumps({"phase": "installed", "transaction": str(transaction),
-          "pending": ["客户端重载与 Hook 信任", "新工作区与 QuickAdd 实测", "旧目录归档"]}, ensure_ascii=False))
+          "pending": ["客户端重载与 Skills 发现", "新工作区与 QuickAdd 实测", "旧目录归档"]}, ensure_ascii=False))
 
 
 def rollback(state_dir):
@@ -223,7 +219,6 @@ def rollback(state_dir):
                 continue
             raise ValueError(f"迁移后有新修改，不自动覆盖：{entry['path']}")
     plan = journal["plan"]
-    config_dir, codex_home = Path(plan["config_dir"]), Path(plan["codex_home"])
     journal["phase"] = "rolling_back"
     atomic(transaction / "journal.json", journal)
     run("codex", "plugin", "remove", PLUGIN_ID)
@@ -243,7 +238,7 @@ def rollback(state_dir):
 
 def main():
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("command", choices=("plan", "apply", "status", "rollback", "disable", "check-host"))
+    p.add_argument("command", choices=("plan", "apply", "status", "rollback", "disable"))
     p.add_argument("--vault-root", type=Path, required=True)
     p.add_argument("--source-target", type=Path, required=True)
     p.add_argument("--with-paper-summarizer", action="store_true")
@@ -255,10 +250,7 @@ def main():
         if plan["binding"] and a.mode != plan["mode"]:
             raise ValueError("已绑定 vault 不跨模式迁移；请使用独立工作 vault")
         plan["mode"] = a.mode
-    if a.command == "check-host":
-        preflight(a.with_paper_summarizer)
-        print("宿主已发现插件 SessionStart Hook；仍需用户信任并验收 GUI。")
-    elif a.command == "plan":
+    if a.command == "plan":
         print(json.dumps({k: v for k, v in plan.items() if k != "binding"}, ensure_ascii=False, indent=2))
     elif a.command == "apply":
         apply(plan, a.with_paper_summarizer, a.remote_app_id)

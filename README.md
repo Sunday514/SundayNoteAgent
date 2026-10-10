@@ -38,7 +38,7 @@ git pull --ff-only
 python3 install/migrate_plugin.py apply --vault-root /path/to/vault --source-target "$PWD"
 ```
 
-完整选项、同步范围、停用与回退见[安装说明](install/README.md)。迁移保留 Git 和本地文件，不迁移知识正文。客户端重载与 Hook 信任通过前，不清理旧源码。
+完整选项、同步范围、停用与回退见[安装说明](install/README.md)。迁移保留 Git 和本地文件，不迁移知识正文。客户端重载并验证 Skills 发现前，不清理旧源码。
 
 ## 内容与源码
 
@@ -51,7 +51,8 @@ Raw、日/周/月记录、项目与长期图片按工作/个人分区，Wiki 统
 源码职责：
 
 - `skills/`：语义工作流与其必要脚本；`automation/`：QuickAdd 和 Monitor。
-- `install/`：安装、插件构建、迁移与 scaffold；`plugin/`：薄运行入口；`templates/`：无个人条目的 Routine 结构。
+- `remote/`：目录受限的远程开发沙箱 MCP；服务在 VPS 独立部署，不进入插件包。
+- `install/`：安装、插件构建、迁移与 scaffold；`templates/`：无个人条目的 Routine 结构。
 - `migration/`：外部资料导入辅助工具；`tests/` 与 `validation/`：脱敏回归和开发诊断。
 
 个人正文、模板条目、附件、设备路径、凭据和运行日志不提交本仓库。开发规则见 [AGENTS.md](AGENTS.md)。
@@ -59,6 +60,7 @@ Raw、日/周/月记录、项目与长期图片按工作/个人分区，Wiki 统
 ## 验证
 
 ```bash
+npm --prefix remote ci
 bash tests/run.sh
 ```
 
@@ -70,4 +72,4 @@ KDI 的 `validation/knowledge_delta.py` 提供 `prepare/run/judge/report/all/cle
 
 插件由现有源文件生成，安装后通过官方 marketplace 更新，不编辑缓存。代码、绑定和运行状态各自独立；插件停用不删除笔记或 QuickAdd。KDI 使用 `--plugin-root` 校验实际插件版本并冻结其 Skills，不把源码当成已安装版本。
 
-VPS 服务独立运行；远程连接可通过已核实的 App ID 打包，未提供时保留已有连接，不猜测 ID 或复制认证。远程仍依赖的规则副本单独维护，不因本机迁移删除。备份、同步与 iOS 阅读不属于插件业务。
+源码统一维护在 SundayNoteAgent，VPS 服务独立部署。本地插件提供 Skills，并可通过已核实的 App ID 连接远程 MCP；这不等于云端已安装同一套 Skills。远程执行只开放部署端批准的容器工作区，不暴露宿主 Shell。服务部署、权限与接口契约见 [remote/README.md](remote/README.md)，地址、认证、权限配置和运行状态由部署端管理。备份、同步与 iOS 阅读不属于插件业务。

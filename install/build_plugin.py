@@ -30,24 +30,16 @@ def build(output, paper=False, remote_app_id=None):
         if any(p.is_symlink() for p in tree.rglob("*")):
             raise ValueError("插件源码不可包含符号链接")
         shutil.copytree(tree, package / "skills" / name, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
-    tree = SOURCE / "plugin"
-    if any(p.is_symlink() for p in (tree, *tree.rglob("*"))):
-        raise ValueError("插件源码不可包含符号链接")
-    shutil.copytree(SOURCE / "plugin", package / "plugin", ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
-    extension = {"hooks": "./hooks/hooks.json", "interface": {"displayName": "SundayNoteAgent",
+    extension = {"interface": {"displayName": "SundayNoteAgent",
                  "shortDescription": "个性化知识检索与积累", "category": "Productivity"}}
     if remote_app_id:
-        if not remote_app_id.startswith(("plugin_asdk_app_", "connector_")):
+        if not remote_app_id.startswith(("asdk_app_", "plugin_asdk_app_", "connector_")):
             raise ValueError("必须提供已核实的远程 App ID")
         write(package / ".app.json", {"apps": {"sundaynote-vps": {"id": remote_app_id}}})
         extension["apps"] = "./.app.json"
     write(package / "plugin.json", {"$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
           "name": "sunday-note-agent", "version": "1.0.0", "description": "使用与维护个人或工作知识库，复用现有本地与远程能力。",
           "extensions": {"com.openai": extension}})
-    def handler(command):
-        return [{"hooks": [{"type": "command", "command": f'python3 "${{PLUGIN_ROOT}}/plugin/entry.py" {command}', "timeout": 5}]}]
-    hooks = {"SessionStart": handler("context")}
-    write(package / "hooks" / "hooks.json", {"hooks": hooks})
     hashes = {p.relative_to(package).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()
               for p in sorted(package.rglob("*")) if p.is_file()}
     version = "1.0.0+" + hashlib.sha256(json.dumps(hashes, sort_keys=True).encode()).hexdigest()[:12]

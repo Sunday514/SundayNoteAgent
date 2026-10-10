@@ -1,6 +1,6 @@
 # 安装、更新与迁移
 
-知识库能力使用 Codex 本地插件，Monitor 独立在本机安装。源码可以在任意 vault 外目录；运行依赖 Linux、Python 3.11+、Codex 的插件与 Hooks 支持，Monitor 另需 rg、原生队列和 MCP Apps。一个本机配置绑定一个 vault。
+知识库能力使用 Codex 本地插件，Monitor 独立在本机安装。源码可以在任意 vault 外目录；运行依赖 Linux、Python 3.11+、Codex 的插件支持，Monitor 另需 Hooks、rg、原生队列和 MCP Apps。一个本机配置绑定一个 vault。
 
 ## 安装
 
@@ -21,9 +21,9 @@ python3 install/migrate_plugin.py apply --vault-root /path/to/vault --source-tar
 - `work`：仅工作分区及 Wiki、工作日/周/月记录与模板，不创建个人内容。严格隔离使用独立工作 vault。
 - Paper 首次按参数选装，更新保留。远程可加 `--remote-app-id`，仅接受已核实的注册 App ID，不填写网址或凭据；不提供时不影响已有远程连接或本地功能。Monitor 的 Skill、代码、Hooks 和 MCP 均不进入插件。
 
-插件通过官方 `codex plugin marketplace add` 和 `codex plugin add` 安装。首次安装后必须在客户端审阅并信任插件 Hooks，再重载并验证工具发现。代码有独立内容版本，不直接写插件缓存。
+插件通过官方 `codex plugin marketplace add` 和 `codex plugin add` 安装，使用目标 App 自带的运行时，不用 PATH 中另一份 CLI 推断 App 能力。首次安装后重载客户端并验证 Skills 发现。代码有独立内容版本，不直接写插件缓存。
 
-`apply` 在修改真实文件前，先用独立临时 Codex home 验证宿主确实发现用于定位 vault 的 `SessionStart` Hook；不复制认证、不调用模型。可单独运行 `check-host`。当前实测 Codex 0.160.0 未发现此插件 Hook，因而会拒绝切换；移出 Monitor 不解决这个独立限制。不能用安装成功或旧 `plugin_hooks` 开关绕过检查。
+插件不包含生命周期 Hooks，不要求 `SessionStart`。在 vault 项目中读取其根规则；跨项目使用时显式指定 vault，或按需读取本机绑定中的 `vault` 字段并确认目标。不要默认将当前代码仓库当作知识库。
 
 ## 文件职责
 
@@ -59,8 +59,6 @@ python3 install/migrate_plugin.py rollback --vault-root /path/to/vault --source-
 
 每次 `apply` 保存精确配置备份和分步 hash 检查点。中断后先查看状态并回退；不会覆盖旧检查点后直接重试。`rollback` 恢复最近一次迁移接管的配置；不属于中断步骤的新修改会阻止回退。中断步骤涉及的文件若内容未确认，先完整保存在备份目录的 `recovery/` 中再恢复原配置，需人工核查这些留存内容（包括可能的用户编辑）。正常迁移完成后的用户修改仍阻止自动回退。源码副本和备份保留，独立 Monitor 不变。
 
-若已有旧插件内的 Monitor 绑定，迁移会停止，要求先按原版本回退并确认独立本地部署；不静默丢弃旧插件的 Monitor 状态。
-
 真实验收后才考虑归档旧源码，并先确认本地 Monitor 的 query 路径不再依赖它。不要随插件清理 `.sunday-note-agent/monitor`、`.logs/codex` 或 Monitor Skill；不要删除 VPS 仍读取的远程规则副本，也不要整目录删除 vault 的 `.agents` 或 `.logs`。
 
 ## Monitor 与远程边界
@@ -76,7 +74,7 @@ python3 /path/to/vault/.sunday-note-agent/monitor/monitor.py --config /path/to/v
 
 本地部署沿用 `.sunday-note-agent/monitor`、`.agents/skills/sunday-note-monitor` 和 `.logs/codex`，不参与同步。配置中的 `project_roots` 控制监控项目，`reference_roots` 仅控制补充证据；代理保存在本地，不复制认证。独立安装器会启用 Monitor，需要暂停时显式执行 `pause`。队列接受不代表面板已渲染；投递结果不明时不要重复发送。新客户端必须验证工具发现、用户级 Hook 信任和面板。
 
-VPS 继续使用现有服务、认证和受限路径；本机插件不会部署服务或扩大权限。远程 Query/Paper 规则仍按 VPS 原有方式部署，直到独立完成远程迁移。
+远程 MCP 源码与契约统一维护在 [remote/](../remote/README.md)，通过 rootless 容器执行受限工作区任务，VPS 独立部署。本机插件只通过 `--remote-app-id` 连接已有 App，不部署服务、扩大挂载或自动发布云端 Skills。服务端升级和客户端工具刷新需单独验收；旧文档接口的正文过滤授权不能直接转换成沙箱目录挂载。
 
 基础安装器 `--deployment standalone` 仍可用于不使用插件的设备和兼容规则导出；不要在本机插件旁再导出同名知识库 Skills。`configure_monitor.py` 负责独立本地 Monitor，不经插件入口。
 
@@ -84,4 +82,4 @@ VPS 继续使用现有服务、认证和受限路径；本机插件不会部署�
 
 `bash tests/run.sh` 使用脱敏临时目录覆盖现有功能、插件构建、迁移、重复更新、停用与回退。KDI 的 `prepare/all --plugin-root <实际插件缓存目录>` 将实际部署与源码 hash 对照，并冻结对应 Skills；不填时检查 vault 内部署。
 
-机械验证不代表 Hook 已获信任、Obsidian GUI 已完成验收，也不证明知识库整体有效。
+机械验证不代表客户端已发现 Skills、Obsidian GUI 已完成验收，也不证明知识库整体有效。

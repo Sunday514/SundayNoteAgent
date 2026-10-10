@@ -77,7 +77,7 @@ def lock(path, blocking=True):
 
 def root_for(config):
     vault = Path(config["vault"]).resolve()
-    root = Path(config["state_dir"]).absolute() if config.get("state_dir") else vault / ".logs" / "codex"
+    root = vault / ".logs" / "codex"
     for path in (root, *root.parents):
         if path.is_symlink():
             raise ValueError("log directories must not be symlinks")
@@ -138,7 +138,6 @@ def git_common_dir(path):
 def project_dir(root, cwd):
     path = Path(cwd).resolve()
     identity = str(git_common_dir(path) or path)
-    identity = read_json(root / "project-aliases.json", {}).get(identity, identity)
     target = root / "projects" / digest(identity)[:24]
     if (root / "projects").is_symlink() or target.is_symlink():
         raise ValueError("refuse symlink project directory")
