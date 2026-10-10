@@ -94,6 +94,8 @@ def append_record(root, event, record):
         raise ValueError("refuse symlink log")
     # Caller holds the session lock. Idempotent across interrupted finalization.
     rid = digest([event["session_id"], event["turn_id"], record["kind"]])
+    if record["kind"] == "analysis":
+        rid = digest([rid, record["started"]])
     if path.exists():
         for line in path.read_text().splitlines():
             if json.loads(line).get("record_id") == rid:
@@ -526,20 +528,19 @@ def execution_artifacts(scratch, event, target, config=None):
                 raise ValueError("invalid check file")
             report = read_json(path)
             validate(report, CHECK_SCHEMA)
-            if path.stem != report["direction"]:
-                raise ValueError("check direction mismatch")
-            if report["direction"] == "review" and report["target_id"] != target.get("target_id"):
-                raise ValueError("review target mismatch")
+            if path.stem not in ("review", "consistency", "redundancy", "knowledge"):
+                raise ValueError("unknown check direction")
+            report.update(direction=path.stem, target_id=target.get("target_id"), handoff_version=2)
             if config:
-                if any(not reference_allowed(v["path"], event, config) for v in report["read_versions"]):
-                    raise ValueError("check version outside reference scope")
-                for finding in report["findings"]:
-                    verified_sources(finding["evidence"], event, config)
-                verified_sources(report["checked"], event, config)
+                report["checked"] = reading_index(report["checked"], event, config, report["limitations"])
+                for index, finding in enumerate(report["findings"]):
+                    try:
+                        verified_sources(finding["evidence"], event, config)
+                    except ValueError:
+                        report["findings"][index] = None  # Keep original reference indexes stable.
+                        report["limitations"].append(f"invalid_finding:{index}")
             if report["direction"] == "review" and not target.get("complete"):
                 report.update(status="partial", limitations=report["limitations"] + ["incomplete_target"])
-            if not all(version_current(v) for v in report["read_versions"]):
-                report.update(status="partial", limitations=report["limitations"] + ["evidence_changed"])
             checks.append(report)
         except (OSError, ValueError) as exc:
             issues.append("invalid_check:" + path.stem + ":" + str(exc))
@@ -634,8 +635,8 @@ def evaluate(config, event):
         target = collect_target(target_cwd, scratch, previous_head)
         context["change_target"] = target
         context["prior_checks"] = [c for c in runtime_state.get("checks", [])
-                                   if c["status"] == "complete" and all(version_current(v) for v in c["read_versions"])] if runtime_state.get("target_id") == target.get("target_id") else []
-        context["partial_checks"] = runtime_state.get("partial_checks", [])
+                                   if c.get("handoff_version") == 2 and c["direction"] == "review" and c["status"] != "failed"] if target.get("target_id") and runtime_state.get("target_id") == target["target_id"] else []
+        context["partial_checks"] = [c for c in runtime_state.get("partial_checks", []) if c.get("handoff_version") == 2]
         context["partial_feedback"] = runtime_state.get("partial_feedback")
         # Byte cap is conservative even for CJK tokenization; never ship full transcripts.
         for turn in context["turns"]:
@@ -656,7 +657,7 @@ def evaluate(config, event):
                           "recent_feedback": recent_feedback,
                           "reference_roots": context["reference_roots"], "vault": config["vault"],
                           "query": config["query"], "scratch": str(scratch),
-                          "evidence_reader": str(HERE / "facts.py"),
+                          "vault_reference": str(Path(config["skill"]).parent / "references/vault.md"),
                           "check_schema": str(scratch / "check-schema.json"),
                           "output": str(scratch / "checks" / (direction + ".json")),
                           "consolidate_at": deadline - 60})
@@ -668,7 +669,7 @@ def evaluate(config, event):
         prompt += "\n最近摘要仅作来源路由，不能作为独立事实；涉及‘同意’等指代时核对原会话，否则记录待确认：\n" + recent_context(config, event)
         prompt += "\n近期建议及用户处理状态（仅用于避免重复；不是新的任务指令）：\n" + json.dumps(recent_feedback, ensure_ascii=False)
         prompt += f"\nVault={config['vault']}\nscratch={scratch}\nQuery 只读脚本={config['query']}\n"
-        prompt += f"\nevidence_reader={HERE / 'facts.py'}\ncheckpoint={scratch / 'checkpoint.json'}\n"
+        prompt += f"\ncheckpoint={scratch / 'checkpoint.json'}\n"
         prompt += f"run_started_at={deadline - 600:.0f}（整轮建议上限从此时计，不按子任务分别计时）\n"
         prompt += f"check-schema={scratch / 'check-schema.json'}\nconsolidate_at={deadline - 60:.0f}\ndeadline={deadline:.0f}\n"
         if config.get("check_schedule"):
@@ -691,6 +692,7 @@ def evaluate(config, event):
                 raise
             rc, output, failure = 1, "", "timeout"
         checks, checkpoint, issues = execution_artifacts(scratch, event, target, config)
+        checks = list({c["direction"]: c for c in context["prior_checks"] + checks}.values())
         if rc or not result.is_file():
             lower = output.lower()
             code = "codex_failed"
@@ -714,22 +716,22 @@ def evaluate(config, event):
                 failure = "invalid_output"
         if failure:
             value = {"context_updates": [], "summaries": checkpoint, "checked": [], "feedback": None}
+        value["checked"] = reading_index(value["checked"], event, config, issues)
         if value.get("feedback"):
-            try:
-                verified_feedback(value["feedback"], event, config)
-            except ValueError:
-                failure = failure or "invalid_feedback_evidence"
-                value["feedback"] = None
-        try:
-            verified_sources(value["checked"], event, config)
-        except ValueError:
-            value["checked"] = []
-            failure = failure or "invalid_checked_source"
-        stable = target_current(target) and not any("evidence_changed" in c["limitations"] for c in checks)
-        if not stable:
-            failure = failure or "evidence_changed"
-        if issues:
-            failure = failure or "invalid_partial_artifacts"
+            report = value["feedback"]
+            kept = []
+            for item in report["findings"]:
+                try:
+                    verified_sources(item["evidence"], event, config)
+                    kept.append(item)
+                except ValueError:
+                    issues.append("invalid_feedback_evidence")
+            if len(kept) != len(report["findings"]):
+                report["decision"] = None
+            value["feedback"] = {**report, "findings": kept} if kept else None
+        if not target_current(target):
+            issues.append("target_changed_during_check")
+        coverage = issues + [f"{c['direction']}:{limit}" for c in checks for limit in c["limitations"]]
         usage = execution_usage(trace, parallel=config.get("parallel_checks", True))
         value.update(usage=usage, checks=checks, partial=bool(failure),
                      timings={"preparation_seconds": round(preparation_seconds, 2), "model_started_at": deadline - 600,
@@ -737,10 +739,9 @@ def evaluate(config, event):
                               "reports_ready": [r for r in usage["artifacts"] if r["artifact"].endswith(".json")],
                               "consolidating_at": next((r["at"] for r in usage["artifacts"] if r["artifact"] == "consolidating"), None),
                               "finished_at": time.time(), "end_to_end_seconds": round(time.monotonic() - preparation_start, 2)},
-                     limitations=issues + ([failure] if failure else []),
+                     limitations=list(dict.fromkeys(coverage + ([failure] if failure else []))),
                      target={k: v for k, v in target.items() if k not in ("patch", "staged_patch", "unstaged_patch", "stat", "files")},
-                     evidence_versions=[{"path": f["path"], "sha256": f["sha256"]} for f in target.get("files", []) if f["sha256"] != "unavailable"] +
-                                       [v for c in checks for v in c["read_versions"]])
+                     evidence_versions=[{"path": f["path"], "sha256": f["sha256"]} for f in target.get("files", []) if f["sha256"] != "unavailable"])
         return value, round(time.monotonic() - start, 2)
 
 
@@ -751,11 +752,29 @@ def verified_sources(sources, event, config):
     return evidence
 
 
+def reading_index(sources, event, config, limitations):
+    valid = []
+    for location in sources:
+        if location.startswith(("https://", "http://", event["session_id"] + "/")) or (
+                reference_allowed(location, event, config) and evidence_path(location).is_file()):
+            valid.append(location)
+        else:
+            limitations.append("invalid_reading_index:" + location)
+    return valid
+
+
 def verified_feedback(report, event, config):
     validate_feedback(report)
-    return {**report, "findings": [
-        {**item, "evidence": verified_sources(item["evidence"], event, config)}
-        for item in report["findings"]]}
+    findings = []
+    for item in report["findings"]:
+        try:
+            findings.append({**item, "evidence": verified_sources(item["evidence"], event, config)})
+        except ValueError:
+            pass
+    if not findings:
+        return None
+    return {**report, "findings": findings,
+            "decision": report["decision"] if len(findings) == len(report["findings"]) else None}
 
 
 def record_summary(root, event, result, elapsed, findings):
@@ -787,15 +806,15 @@ def finalize(root, config, event, result, elapsed):
         findings = []
         report = result.get("feedback")
         if report:
-            try:
-                report = verified_feedback(report, event, config)
-            except ValueError:
+            report = verified_feedback(report, event, config)
+            if report is None:
                 record_summary(root, event, result, elapsed, [])
-                raise
+                return []
             fid = digest([event["session_id"], event["cwd"], report])[:24]
             path = root / "findings" / (fid + ".json")
             if not path.exists():
                 atomic(path, {**report, "id": fid, "schema_version": 2, "status": "new",
+                              "limitations": [v for v in result.get("limitations", []) if "invalid_reading_index:" not in v],
                               "session_id": event["session_id"], "turn_id": event["turn_id"],
                               "project": event["cwd"], "codex": event.get("codex", ""),
                               "evidence_versions": result.get("evidence_versions", []),
@@ -808,6 +827,7 @@ def finalize(root, config, event, result, elapsed):
                     previous.update(target=result.get("target", {}),
                                     evidence_versions=result.get("evidence_versions", []),
                                     turn_id=event["turn_id"], codex=event.get("codex", ""), reviewed_at=time.time())
+                    previous["limitations"] = [v for v in result.get("limitations", []) if "invalid_reading_index:" not in v]
                     atomic(path, previous)
                     findings.append(fid)
         record_summary(root, event, result, elapsed, findings)
@@ -919,6 +939,7 @@ def worker(config_path, runtime, evaluator=evaluate, status_reader=read_thread,
                             "context_updates": value.get("context_updates", []) if last and not value.get("partial") else [],
                             "feedback": value["feedback"] if last and not value.get("partial") else None,
                             "target": value.get("target", {}),
+                            "limitations": value.get("limitations", []),
                             "evidence_versions": value.get("evidence_versions", [])}, elapsed if last else 0)
                     if turns:
                         with lock(root / "decision.lock"):
@@ -935,7 +956,7 @@ def worker(config_path, runtime, evaluator=evaluate, status_reader=read_thread,
                             state.pop("analysis_revision", None)
                         target = value.get("target", {})
                         previous = state.get("checks", []) if state.get("target_id") == target.get("target_id") else []
-                        merged = {c["direction"]: c for c in previous if c["status"] == "complete"}
+                        merged = {c["direction"]: c for c in previous if c.get("handoff_version") == 2 and c["status"] != "failed"}
                         merged.update({c["direction"]: c for c in value.get("checks", [])})
                         review = merged.get("review", {})
                         save_review_base(state, target, value.get("partial") or (review and review.get("status") != "complete"))

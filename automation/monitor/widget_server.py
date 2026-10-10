@@ -40,10 +40,12 @@ def copy_text(item):
     if decision:
         lines += ["用户保存的方向：" if item["status"] in ("confirmed", "submitted", "submitting", "ignored") else "待确认方向：",
                   decision["question"], "选择：" + (item.get("selection") or "未选择")]
-    lines.append("请结合原任务与用户选择考虑以下全部发现；发现本身不构成执行授权：")
+    lines.append("以下是 Monitor 提供的待核实线索；主会话先确认当前证据和适用性，再结合用户请求处理。确认和忽略不构成执行授权：")
     for index, finding in enumerate(item["findings"], 1):
         lines += [f"{index}. {finding['title']}", finding["reason"]]
         lines += [s["location"] + "\n" + s["quote"] for s in finding["evidence"]]
+    if item.get("limitations"):
+        lines += ["检查范围限制：", *item["limitations"]]
     return "\n".join(lines)
 
 

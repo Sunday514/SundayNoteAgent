@@ -83,3 +83,54 @@ python3 /path/to/vault/.sunday-note-agent/monitor/monitor.py --config /path/to/v
 `bash tests/run.sh` 使用脱敏临时目录覆盖现有功能、插件构建、迁移、重复更新、停用与回退。KDI 的 `prepare/all --plugin-root <实际插件缓存目录>` 将实际部署与源码 hash 对照，并冻结对应 Skills；不填时检查 vault 内部署。
 
 机械验证不代表客户端已发现 Skills、Obsidian GUI 已完成验收，也不证明知识库整体有效。
+## Monitor（可选）
+
+Monitor 是只读会话检查旁路，不参与正常 Query/Ingest，也不替代正式 Review。子报告方向和目标由宿主绑定，阅读索引不要求摘录或模型计算 hash；单条坏证据或单方向失败不阻塞其他有效发现，过滤后取消可能依赖它的决策。无最终汇总时不推送，同版本有限覆盖不因基线未知反复检查。
+
+Vault 布局和项目入口由 Skill 的 `references/vault.md` 维护，不放入动态项目上下文；检查实际矛盾及关键变化尚未承接，普通实现细节不要求更新文档。主会话处理前核实当前证据及适用性。
+
+在独立源码目录安装与停用：
+
+```bash
+bash install/install.sh --vault-root /path/to/vault --with-monitor --monitor-only
+bash install/install.sh --vault-root /path/to/vault --without-monitor --monitor-only
+```
+
+依赖 Linux、Python 3.11+、rg，以及支持临时会话、忽略用户配置和 permission profile 的 Codex。自动反馈还需要来源 App 状态接口、原生队列和 MCP Apps。只使用 ChatGPT 订阅认证，不复制凭据或回退 API。
+
+安装器合并用户级 Hooks/MCP，部署本项目脚本和面板；其他配置保留。同名未托管 MCP 或冲突的 inline Hooks 会阻止安装。安装后在 Codex `/hooks` 中审阅并信任 Hooks，重新加载客户端 MCP，并验证一次无副作用反馈。卸载移除托管入口、保留日志。当前一个用户配置绑定一个 vault，各设备分别安装。
+
+### 范围与运行状态
+
+本地配置位于 `.logs/codex/config.json`：
+
+- `project_roots`：监控项目，默认绑定 vault；空数组停止采集。同仓库 worktree 按 Git 公共目录识别，独立 clone 不自动放行。
+- `reference_roots`：允许作为补充文件证据的目录，不启用监控，也不是操作系统读取隔离。不要填主目录或文件系统根目录。
+- 配置使用明确绝对路径，更新保留已有选择；日志、建议、队列和状态均属私人数据，不提交或同步。
+
+在 vault 根目录操作：
+
+```bash
+python3 .sunday-note-agent/monitor/monitor.py --config .logs/codex/config.json status
+python3 .sunday-note-agent/monitor/monitor.py --config .logs/codex/config.json pause
+python3 .sunday-note-agent/monitor/monitor.py --config .logs/codex/config.json resume
+python3 .sunday-note-agent/monitor/monitor.py --config .logs/codex/config.json retry
+```
+
+`pause` 不强杀当前检查；`retry` 重试分析队列，不盲目重发投递结果不明的消息。更新会停止旧执行器并迁移待处理队列，保留日志与用户选择。
+
+桌面 Hook 未继承终端代理时，通过安装器设置本地代理；重新安装保留，传空字符串清除：
+
+```bash
+python3 install/configure_monitor.py --vault-root /path/to/vault --proxy-url 'http://127.0.0.1:<端口>'
+```
+
+### 反馈与故障处理
+
+- 只采集范围内、有持久 transcript 的会话。后台检查沿用来源 Codex 程序；无法识别来源、认证或沙箱失败时保留状态，不自动换模型或程序。
+- 新用户请求使旧待发结果失效；只在来源会话明确空闲、轮次一致时投递。缺少状态通道仍可分析和记录，但不自动推送。
+- 面板“处理”交接任务；“确认”只保存选择、可继续转为处理；“忽略”当前不执行。确认与忽略在后续正常请求中作为上下文交接，不构成自动执行授权。
+- `queued` 仅说明队列接受，不代表面板已渲染；`sending` 或失败需检查状态，不重复投递。工具缺失时重新加载 MCP，不能靠复制完整私人证据到提示词兜底。
+- Git 审查范围未知时报告不完整，不以新 HEAD 补证旧范围；切换仓库不清除原仓库的未知状态。Monitor 建议仍需用户判断。
+
+日常先查看 `status` 的积压和阻塞原因，再检查本地日志。实际模型、委派与证据检查流程以 [Monitor Skill](../skills/sunday-note-monitor/SKILL.md) 和实现为准；此处不复制内部状态机。客户端工具发现、面板渲染和关闭行为需在实际安装后验证。

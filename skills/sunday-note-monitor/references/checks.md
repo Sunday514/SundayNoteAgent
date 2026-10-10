@@ -8,10 +8,8 @@
 
 遵循父 Agent 给出的整轮统一建议上限，不另设自己的预算。充分回答即交接，不为用满时间扩大检查；接近上限时保存已有发现和未覆盖范围。未完成则 status=partial，不为赶时间猜测或把未检查写成通过。必要依赖缺失时说明限制，不到授权范围之外寻找另一个项目版本。
 
-最终在委托的 `checks/<direction>.json` 写入符合 `check-schema.json` 的对象：direction、target_id、status（complete/partial/failed）、findings、checked、read_versions、limitations。只写自己的文件，先写临时文件再原子替换；然后向父 Agent 返回简短摘要与文件路径。无需写原会话历史。
+最终在委托的 `checks/<direction>.json` 写入符合 `check-schema.json` 的对象：status（complete/partial/failed）、findings、checked、limitations。方向与目标身份由宿主绑定，不填写、不计算 hash。只写自己的文件，先写临时文件再原子替换；然后向父 Agent 返回简短摘要与文件路径。无需写原会话历史。
 
-文件证据逐字引用，location 为原文件绝对路径及可核实行号，不引用临时快照路径。使用委托的 `evidence_reader`（Python 脚本，参数为文件路径）读取周边代码，记录其打印的 path/sha256 至 read_versions；同一文件变化时明确报告，不拼接版本。changed-file 快照用于固定目标，当前文件仅用于验证或上下文。网页必须实际打开，原会话引用使用准确 session_id/turn_id。
-
-read_versions 只记录项目/Vault 的原始文件，不写 scratch 快照、schema 或报告路径；它们运行后会删除。变更文件的原路径和版本由宿主从 target.files 记录，不必重复计算；快照对应的证据位置仍使用其原路径。
+实际发现附原文件绝对路径、连续短原文、影响和必要限制；不引用临时快照路径。使用变更快照理解目标，沿关联读取上下文，不为证据交接反复重读或计算 hash。网页必须实际打开，原会话引用使用准确 session_id/turn_id。checked 仅列实际读过的业务来源字符串，不列委托、schema、Skill 或 scratch 文件，不要求摘录。宿主检查引用，主会话在实际处理前核实结论；不自行增加验证轮次。
 
 发现每项为 title、reason、check、evidence；check 为本方向。title、reason 用中文，直接写成可交给主会话的简短说明，包含影响和必要限制，不让父 Agent 再改写；证据保持原语言的完整逐字引用。不输出用户选择或决策。无发现可返回空数组。

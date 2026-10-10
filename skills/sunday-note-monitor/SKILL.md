@@ -9,7 +9,7 @@ description: 接收 Monitor 会话数据包，先整理本轮历史记录，再�
 
 数据包的 `turns` 是同一会话按时间排列的待处理轮次。逐轮整理历史，`summaries` 必须为每个输入 `turn_id` 返回且只返回一项；不要把后来的决定写入前一轮摘要。关联检查可以合并，反馈以最后一轮结束后的状态为准。
 
-`pending_feedback`、`partial_checks` 和 `partial_feedback` 是旧待复核材料，不是已确认事实。结合新增对话、用户选择及当前证据，保留、修订或撤销；最终 `feedback` 替换旧反馈，不追加补发队列。已经有效完成的同一版本 Review 不重跑，读取已有报告；partial/failed 不算完成。
+`pending_feedback`、`partial_checks` 和 `partial_feedback` 是旧材料，不是已确认事实。结合新增对话与用户选择，保留、修订或撤销；最终 `feedback` 替换旧反馈。同版本已有报告直接复用；未知提交基线或有限覆盖本身不是重跑理由，新增变更或关键问题才补查。null 发现表示宿主剔除了无效项，不引用它。
 
 ## 先读本轮，再决定是否补查
 
@@ -69,7 +69,7 @@ description: 接收 Monitor 会话数据包，先整理本轮历史记录，再�
 
 冗余检查者采用高召回提议标准；汇总时保留其具体候选及不确定性，不要求先证明可安全删除，不自动修改。
 
-最终只输出约定 JSON。无必要发现时 `feedback=null`；否则 `feedback.summary` 用一两句话概括，`findings` 保留所有必要的新发现。子检查发现用 direction/index 引用；仅主 Agent 自查项输出 title、reason、check="main" 和逐字 evidence。不虚称 Sol 审查。`checked` 只列主 Agent 自己实际核查的来源，子报告证据不重复抄写。
+最终只输出约定 JSON。无必要发现时 `feedback=null`；否则 `feedback.summary` 用一两句话概括，`findings` 保留必要的新发现。子检查发现用 direction/index 引用；仅主 Agent 自查项输出 title、reason、check="main" 和短原文 evidence。不虚称 Sol 审查。`checked` 仅列自己读过的来源字符串，不写摘录、不重复子报告。一个方向失败不妨碍汇总其他发现，简记未覆盖范围，不追加验证轮次。主会话实际处理前再核实结论。
 
 全部 findings 都是交给主会话补充考虑的信息，不等于执行授权。`decision` 默认 null；整合全部发现后，只有交接前需要用户提供重要方向判断时，才生成一个 question 和 options（最多三个，不包含 Widget 固定提供的“其他”）。决策针对整份反馈，不绑定单条 finding，不要求用户逐条批准发现。主会话结合全部发现、原任务与用户选择判断后续处理。`checked` 仅列实际读过的相关证据。
 
