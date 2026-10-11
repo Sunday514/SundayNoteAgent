@@ -10,14 +10,13 @@
 | 积累知识 | Ingest 分别判断知识增量和来源维护，无变化不写；论文总结生成单篇 Raw 与必要原图 |
 | 显式维护 | Lint 全面深入审读 Wiki 与相关证据，先写整理计划，再执行和复核 |
 | 日常记录 | Routine 使用“计划—记录”；QuickAdd 创建每日记录/日记，更新已有周/月打卡统计 |
-| 可选旁路 | Monitor 只读检查开发会话、展示建议，不替代正式审查，不自动执行建议 |
 | 开发诊断 | KDI 使用隔离工作区和匿名评审比较知识收益；不是日常使用前置条件 |
 
 工作流以 [Skills](skills/) 和安装后的根规则为准。查询不维护计数；旧页面的 `last_queried`、`query_count` 保留为历史字段，不再生成、更新或校验。
 
 ## 安装与更新
 
-源码可位于 vault 外。Codex 插件分发知识库 Skills；Monitor 仅支持独立本地安装，不随插件打包。vault 保留知识、规则、模板和 QuickAdd 托管脚本。首次安装或旧部署迁移：
+源码可位于 vault 外。Codex 插件分发知识库 Skills。vault 保留知识、规则、模板和 QuickAdd 托管脚本。首次安装或旧部署迁移：
 
 ```bash
 python3 install/migrate_plugin.py plan --vault-root /path/to/vault --source-target /path/to/SundayNoteAgent
@@ -50,14 +49,12 @@ Raw、日/周/月记录、项目与长期图片按工作/个人分区，Wiki 统
 
 源码职责：
 
-- `skills/`：语义工作流与其必要脚本；`automation/`：QuickAdd 和 Monitor。
+- `skills/`：语义工作流与其必要脚本；`automation/`：QuickAdd。
 - `remote/`：目录受限的远程开发沙箱 MCP；服务在 VPS 独立部署，不进入插件包。
 - `install/`：安装、插件构建、迁移与 scaffold；`templates/`：无个人条目的 Routine 结构。
 - `migration/`：外部资料导入辅助工具；`tests/` 与 `validation/`：脱敏回归和开发诊断。
 
 个人正文、模板条目、附件、设备路径、凭据和运行日志不提交本仓库。开发规则见 [AGENTS.md](AGENTS.md)。
-
-Monitor 提供待核实线索，实际处理前由主会话确认当前证据；单项交接失败不阻塞其他有效发现。Vault 文档入口由 Skill 参考文档维护。
 
 ## 验证
 

@@ -9,15 +9,43 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import tempfile
 import tomllib
 
 sys.dont_write_bytecode = True
 from build_plugin import CORE
-from configure_monitor import safe_path
-from monitor import atomic, read_json
 
 SOURCE = Path(__file__).resolve().parents[1]
 PLUGIN_ID = "sunday-note-agent@sunday-note-local"
+
+
+def safe_path(path):
+    if any(p.is_symlink() for p in (path, *path.parents)):
+        raise ValueError("refuse symlink installation target: " + str(path))
+
+
+def read_json(path, default=None):
+    try:
+        return json.loads(Path(path).read_text())
+    except FileNotFoundError:
+        return default
+
+
+def atomic(path, value):
+    path = Path(path)
+    safe_path(path)
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    fd, name = tempfile.mkstemp(dir=path.parent)
+    try:
+        with os.fdopen(fd, "w") as out:
+            json.dump(value, out, ensure_ascii=False)
+            out.write("\n")
+            out.flush()
+            os.fsync(out.fileno())
+        os.replace(name, path)
+    finally:
+        if os.path.exists(name):
+            os.unlink(name)
 
 
 def locations():
@@ -231,7 +259,7 @@ def rollback(state_dir):
         run("codex", "plugin", "add", PLUGIN_ID, "--json")
     journal["phase"] = "rolled_back"
     atomic(transaction / "journal.json", journal)
-    print("已恢复迁移前配置；源码副本和备份保留，独立 Monitor 不变，需重载客户端。")
+    print("已恢复迁移前配置；源码副本和备份保留，需重载客户端。")
     if (transaction / "recovery").exists():
         print(f"中断期间的未确认内容已保留，请核查：{transaction / 'recovery'}（编号对应 journal entries 的 backup）")
 
@@ -262,7 +290,7 @@ def main():
         rollback(Path(plan["state_dir"]))
     else:
         run("codex", "plugin", "remove", PLUGIN_ID)
-        print("插件已卸载；知识、QuickAdd 与独立 Monitor 保留。")
+        print("插件已卸载；知识、QuickAdd 与其他工具配置保留。")
 
 
 if __name__ == "__main__":

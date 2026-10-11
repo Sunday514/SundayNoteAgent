@@ -13,8 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "install"))
 import build_plugin as builder
 import migrate_plugin as migration
-from monitor import read_json
-from configure_monitor import configure_mcp
+from migrate_plugin import read_json
 
 
 class PluginTests(unittest.TestCase):
@@ -38,22 +37,12 @@ class PluginTests(unittest.TestCase):
                         "--with-paper-summarizer"], check=True, capture_output=True)
         codex = self.root / "codex"
         codex.mkdir()
-        (codex / "config.toml").write_text(configure_mcp('model = "example"\n',
-            self.vault / ".sunday-note-agent/monitor", self.vault / ".logs/codex/config.json"))
-        for directory in (".sunday-note-agent/monitor", ".agents/skills/sunday-note-monitor"):
-            target = self.vault / directory
-            target.mkdir(parents=True, exist_ok=True)
-            (target / "fixture.txt").write_text("independent local monitor")
+        (codex / "config.toml").write_text('model = "example"\n[mcp_servers.other_tool]\ncommand = "example-tool"\n')
         (codex / "hooks.json").write_text(json.dumps({"hooks": {"Stop": [{"hooks": [
-            {"command": "echo custom"}, {"command": f'python3 {self.vault}/.sunday-note-agent/monitor/monitor.py hook'}]}]}}))
-        root = self.vault / ".logs/codex"
-        root.mkdir(parents=True)
-        (root / "config.json").write_text(json.dumps({"vault": str(self.vault), "project_roots": [str(ROOT)]}))
-        (root / "state.json").write_text('{"enabled": false}')
-        queue = root / "projects/example/sessions/session/queue"
-        queue.mkdir(parents=True)
-        (queue / "pending.json").write_text('{}')
-        (queue.parent / "state.json").write_text(json.dumps({"repository_baselines": {str(ROOT): {"baseline_known": False}}}))
+            {"command": "echo custom"}]}]}}))
+        target = self.vault / ".agents/skills/other-tool"
+        target.mkdir(parents=True)
+        (target / "fixture.txt").write_text("unmanaged content")
 
     def fake_run(self, *args):
         self.calls.append([str(a) for a in args])
@@ -76,7 +65,6 @@ class PluginTests(unittest.TestCase):
             self.assertFalse((package / "plugin").exists())
             self.assertFalse((package / "automation").exists())
             self.assertFalse((package / "remote").exists())
-            self.assertFalse((package / "skills/sunday-note-monitor").exists())
             self.assertFalse((package / "mcp.json").exists())
             self.assertFalse((package / ".git").exists())
             with self.assertRaises(ValueError):
@@ -99,19 +87,15 @@ class PluginTests(unittest.TestCase):
         self.install_old()
         plan = migration.inspect(self.vault, ROOT)
         old_hooks = (self.root / "codex/hooks.json").read_bytes()
-        old_monitor = migration.fingerprint(self.vault / ".logs/codex")
-        local_paths = [self.vault / ".sunday-note-agent/monitor", self.vault / ".agents/skills/sunday-note-monitor",
+        local_paths = [self.vault / ".agents/skills/other-tool",
                        self.root / "codex/config.toml"]
         local_hashes = {p: migration.fingerprint(p) for p in local_paths}
         note = self.vault / "30_知识库/fixture.md"
         note.write_text("human knowledge")
         with patch.object(migration, "run", self.fake_run):
             migration.apply(plan)
-            binding = read_json(self.root / "config/sunday-note-agent/config.json")
             self.assertFalse((self.vault / ".agents/skills/sunday-note-query").exists())
             self.assertTrue((self.vault / "SundayNoteTools/quickadd/create_daily.js").is_file())
-            self.assertFalse((Path(binding["state_dir"]) / "monitor").exists())
-            self.assertEqual(migration.fingerprint(self.vault / ".logs/codex"), old_monitor)
             self.assertEqual(note.read_text(), "human knowledge")
             self.assertEqual((self.root / "codex/hooks.json").read_bytes(), old_hooks)
             self.assertEqual({p: migration.fingerprint(p) for p in local_paths}, local_hashes)
@@ -122,7 +106,6 @@ class PluginTests(unittest.TestCase):
             self.assertEqual(note.read_text(), "human knowledge")
             migration.apply(migration.inspect(self.vault, ROOT))
             migration.apply(migration.inspect(self.vault, ROOT))
-            self.assertEqual(migration.fingerprint(self.vault / ".logs/codex"), old_monitor)
             self.assertEqual((self.root / "codex/hooks.json").read_bytes(), old_hooks)
         self.assertTrue(any(c[:3] == ["codex", "plugin", "add"] for c in self.calls))
 

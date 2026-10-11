@@ -7,8 +7,6 @@ INSTALL_STATE=""
 VAULT_ROOT=""
 INSTALL_MODE=""
 WITH_PAPER_SUMMARIZER=0
-MONITOR_MODE=""
-MONITOR_ONLY=0
 ROUTINE_TEMPLATES_MODE="managed"
 OPTIONAL_CONFIG_PYTHON=""
 PERSONAL_CONTEXT_HEADING='## 个性化响应'
@@ -30,8 +28,6 @@ Usage:
   install.sh [--vault-root <vault-dir>] [--with-paper-summarizer]
              [--mode personal|work]
              [--routine-templates managed|preserve]
-  install.sh --vault-root <vault-dir> --with-monitor [--monitor-only]
-  install.sh --vault-root <vault-dir> --without-monitor --monitor-only
 
 Install or update SundayNoteAgent-managed files from the current checkout.
 --vault-root is required; the checkout may live outside the vault.
@@ -66,18 +62,6 @@ while [ "$#" -gt 0 ]; do
       ;;
     --with-paper-summarizer)
       WITH_PAPER_SUMMARIZER=1
-      shift
-      ;;
-    --with-monitor)
-      MONITOR_MODE="install"
-      shift
-      ;;
-    --without-monitor)
-      MONITOR_MODE="uninstall"
-      shift
-      ;;
-    --monitor-only)
-      MONITOR_ONLY=1
       shift
       ;;
     --routine-templates)
@@ -123,18 +107,6 @@ if [ -n "$VAULT_ROOT" ]; then
 else
   echo "--vault-root is required" >&2
   exit 2
-fi
-
-configure_monitor() {
-  local args=(--vault-root "$VAULT_ROOT")
-  if [ "$MONITOR_MODE" = uninstall ]; then args+=(--uninstall); fi
-  python3 "$SCRIPT_DIR/configure_monitor.py" "${args[@]}"
-}
-
-if [ "$MONITOR_ONLY" -eq 1 ]; then
-  [ -n "$MONITOR_MODE" ] || { echo "--monitor-only requires --with-monitor or --without-monitor" >&2; exit 2; }
-  configure_monitor
-  exit 0
 fi
 
 mode_file="${INSTALL_STATE:-$VAULT_ROOT/.sunday-note-agent/install-mode}"
@@ -491,7 +463,6 @@ echo "Installed or updated Sunday Note vault at: $VAULT_ROOT"
 mkdir -p "$(dirname -- "$mode_file")"
 printf '%s\n' "$INSTALL_MODE" > "$mode_file"
 echo "安装模式：$INSTALL_MODE"
-if [ -n "$MONITOR_MODE" ]; then configure_monitor; fi
 if [ "$ROUTINE_TEMPLATES_MODE" = managed ]; then
   echo "Managed rules, skills, and Routine files were refreshed from: $PROJECT_DIR_NAME"
 else
