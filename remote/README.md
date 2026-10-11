@@ -20,13 +20,15 @@ MCP 管理已授权工作区和任务。Shell、Python、Git、编译器及文�
 {
   "id": "project",
   "mounts": [
-    {"source": "/srv/authorized-project", "target": "/workspace/project", "mode": "rw"},
+    {"source": "/srv/authorized-project", "target": "/workspace/project", "mode": "rw", "exclude": [".settings"]},
     {"source": "/srv/authorized-reference", "target": "/workspace/reference", "mode": "ro"}
   ]
 }
 ```
 
 模型不能修改挂载、镜像或权限配置。目录必须存在且不经过符号链接；禁止宿主根目录、整个 HOME、凭据及服务配置目录。获准目录内不得存放密钥、socket 或其他不应暴露的内容。
+
+`exclude` 指定挂载根目录下要屏蔽的文件或目录名，不接受路径或 `..`；由容器运行时遮蔽，不能读取或写入，工作区列表返回排除项。文档库应排除设备配置、工具运行状态和同步内部目录。容器通过 crun 保留服务用户已有的附加组，以访问共享目录，不修改宿主所有者或权限；新建文件仍须遵守共享目录的 ACL/权限约定。
 
 所有任务固定禁网、只读镜像、私有 PID/IPC、移除 capabilities、禁止提权；一次一个任务，256 MiB 内存、64 个进程、0.5 CPU，最长 300 秒。必须使用 rootless Podman 和具备 CPU/内存/进程限制的 cgroups v2；预检失败停止，不回退宿主执行。临时目录 64 MiB，单文件写入上限 64 MiB；挂载的总磁盘用量仍需部署端配额或监控。
 
@@ -36,7 +38,7 @@ MCP 管理已授权工作区和任务。Shell、Python、Git、编译器及文�
 
 ## 部署
 
-要求 Linux、Node.js 20+、rootless Podman、uidmap、cgroups v2。以服务普通用户构建并记录镜像 ID：
+要求 Linux、Node.js 20+、rootless Podman、crun、uidmap、cgroups v2。以服务普通用户构建并记录镜像 ID：
 
 ```bash
 podman build -t localhost/sundaynote-sandbox:3.0.0 -f Containerfile .

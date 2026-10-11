@@ -17,6 +17,7 @@ const schema = z.object({
       source: z.string().startsWith('/'),
       target: z.string().regex(/^\/workspace\/[a-z][a-z0-9-]{0,39}$/),
       mode: z.enum(['ro', 'rw']),
+      exclude: z.array(z.string().regex(/^[a-zA-Z0-9_.-]+$/).refine(v => v !== '.' && v !== '..')).max(32).default([]),
     }).strict()).min(1).max(8),
   }).strict()).max(16),
 }).strict();
@@ -48,7 +49,7 @@ export async function loadConfig(file) {
 export function runArgs(config, workspace, id, command, timeout) {
   return ['run', '-d', '--name', id, '--label', label + '=1',
     '--label', 'io.sundaynote.workspace=' + workspace.id, '--pull=never',
-    '--network=none', '--http-proxy=false', '--no-hosts',
+    '--network=none', '--http-proxy=false', '--no-hosts', '--runtime=crun', '--group-add=keep-groups', '--umask=0007',
     '--read-only', '--read-only-tmpfs=false', '--cap-drop=ALL',
     '--security-opt=no-new-privileges', '--userns=keep-id',
     '--user', process.getuid() + ':' + process.getgid(), '--pid=private', '--ipc=private',
@@ -61,6 +62,7 @@ export function runArgs(config, workspace, id, command, timeout) {
     '--env=HOME=/tmp', '--env=TMPDIR=/tmp',
     ...workspace.mounts.flatMap(m => ['--mount',
       'type=bind,source=' + m.source + ',destination=' + m.target + ',' + m.mode + ',bind-propagation=rprivate']),
+    ...workspace.mounts.flatMap(m => (m.exclude || []).flatMap(name => ['--security-opt', 'mask=' + m.target + '/' + name])),
     '--workdir', workspace.mounts[0].target, '--entrypoint=/bin/sh', config.image, '-lc', command];
 }
 
@@ -76,15 +78,15 @@ export class Sandbox {
   async preflight() {
     if (process.getuid() === 0) throw new Error('Root MCP is forbidden');
     const info = JSON.parse((await this.podman(['info', '--format=json'])).stdout);
-    if (!info.host.security.rootless || info.host.cgroupVersion !== 'v2'
+    if (!info.host.security.rootless || info.host.ociRuntime.name !== 'crun' || info.host.cgroupVersion !== 'v2'
         || !['cpu','memory','pids'].every(c => info.host.cgroupControllers.includes(c))) {
-      throw new Error('Rootless Podman with CPU/memory/PID cgroups v2 is required');
+      throw new Error('Rootless Podman with crun and CPU/memory/PID cgroups v2 is required');
     }
     await this.podman(['image', 'exists', this.config.image]);
   }
   workspaces() {
     return {network:'none', max_concurrent_tasks:1, timeout_max_seconds:300, memory_mib:256, pids:64, cpus:0.5,
-      workspaces:this.config.workspaces.map(w => ({id:w.id, mounts:w.mounts.map(({target,mode}) => ({path:target,mode}))}))};
+      workspaces:this.config.workspaces.map(w => ({id:w.id, mounts:w.mounts.map(({target,mode,exclude=[]}) => ({path:target,mode,excluded:exclude}))}))};
   }
   async tasks() {
     const {stdout} = await this.podman(['ps','-a','--filter','label='+label+'=1','--format=json']);

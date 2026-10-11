@@ -19,19 +19,23 @@ test('配置拒绝宽目录、符号链接、重复入口和动态扩权',async 
   const link=join(temp,'link');await symlink(source,link);
   config.workspaces[0].mounts[0].source=link;await save();await assert.rejects(loadConfig(file));
   config.workspaces[0].mounts[0].source=source;
+  config.workspaces[0].mounts[0].exclude=['../private'];await save();await assert.rejects(loadConfig(file));
+  config.workspaces[0].mounts[0].exclude=['..'];await save();await assert.rejects(loadConfig(file));
+  config.workspaces[0].mounts[0].exclude=['.settings'];await save();await loadConfig(file);
   config.workspaces[0].network='host';await save();await assert.rejects(loadConfig(file));
   delete config.workspaces[0].network;
   config.workspaces.push(config.workspaces[0]);await save();await assert.rejects(loadConfig(file));
 });
 
 test('命令只进入容器，参数锁定隔离和资源约束',()=>{
-  const workspace={id:'test',mounts:[{source:'/tmp/fixture',target:'/workspace/project',mode:'ro'}]};
+  const workspace={id:'test',mounts:[{source:'/tmp/fixture',target:'/workspace/project',mode:'ro',exclude:['.settings']}]};
   const command='echo hello; cat /etc/passwd';
   const args=runArgs({image:'sha256:'+'a'.repeat(64)},workspace,'sundaynote-job-test',command,30);
   assert.equal(args.at(-1),command);
   for(const flag of ['--network=none','--http-proxy=false','--read-only','--cap-drop=ALL',
     '--security-opt=no-new-privileges','--userns=keep-id','--pids-limit=64','--memory=256m',
-    '--cpus=0.5','--pull=never','--entrypoint=/bin/sh'])assert.ok(args.includes(flag));
+    '--cpus=0.5','--pull=never','--entrypoint=/bin/sh','--runtime=crun','--group-add=keep-groups',
+    'mask=/workspace/project/.settings'])assert.ok(args.includes(flag));
   assert.ok(args.some(a=>a.includes('destination=/workspace/project,ro,')));
   assert.ok(!args.includes('--privileged'));
   assert.ok(!args.some(a=>a.includes('FS_API_KEY')));

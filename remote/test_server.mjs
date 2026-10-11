@@ -21,10 +21,12 @@ test('真实 rootless MCP：隔离、工具链、任务、取消、超时', {
     await rm(temp,{recursive:true,force:true});
   });
   await mkdir(join(temp,'rw'));await mkdir(join(temp,'ro'));
+  await mkdir(join(temp,'rw','.settings'));
+  await writeFile(join(temp,'rw','.settings','private.txt'),'PRIVATE_SETTINGS');
   await writeFile(join(temp,'ro','evidence.txt'),'source');
   await writeFile(join(temp,'private.txt'),'HOST_PRIVATE_MARKER');
   const config={version:1,image:process.env.SANDBOX_TEST_IMAGE,workspaces:[{id:'fixture',mounts:[
-    {source:join(temp,'rw'),target:'/workspace/project',mode:'rw'},
+    {source:join(temp,'rw'),target:'/workspace/project',mode:'rw',exclude:['.settings']},
     {source:join(temp,'ro'),target:'/workspace/source',mode:'ro'},
   ]}]};
   const configFile=join(temp,'config.json');await writeFile(configFile,JSON.stringify(config));
@@ -72,6 +74,8 @@ test('真实 rootless MCP：隔离、工具链、任务、取消、超时', {
   const command=[
     'set -eu','test -z "${FS_API_KEY-}"','test ! -e '+temp+'/private.txt',
     'test ! -e /home/codex/.ssh','test ! -e /run/podman/podman.sock',
+    'test ! -e /workspace/project/.settings/private.txt',
+    'if touch /workspace/project/.settings/forbidden 2>/dev/null; then exit 14; fi',
     'test "$(cat /sys/fs/cgroup/memory.max)" = 268435456',
     'test "$(cat /sys/fs/cgroup/pids.max)" = 64',
     'test "$(cat /sys/fs/cgroup/cpu.max)" = "50000 100000"',
@@ -86,6 +90,7 @@ test('真实 rootless MCP：隔离、工具链、任务、取消、超时', {
   assert.equal(done.exit_code,0,done.output);assert.match(done.output,/SANDBOX_OK/);
   assert.deepEqual(await readFile(join(temp,'rw','result.bin')),Buffer.from([0,1,255]));
   assert.equal(await readFile(join(temp,'private.txt'),'utf8'),'HOST_PRIVATE_MARKER');
+  assert.equal(await readFile(join(temp,'rw','.settings','private.txt'),'utf8'),'PRIVATE_SETTINGS');
   const running=await start('sleep 60 & wait',90);
   assert.equal((await call('execute',{workspace:'fixture',command:'id'})).isError,true);
   const cancelled=(await call('cancel_task',{id:running})).structuredContent;
