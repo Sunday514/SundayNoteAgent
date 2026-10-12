@@ -1,9 +1,9 @@
 module.exports = async function createOrOpenDiary(params) {
   const { app, variables = {} } = params;
   const active = app.workspace.getActiveFile();
-  const activeDate = active?.path.startsWith("20_每日记录/个人/") ? active.basename : "";
+  const activeDate = active?.path.startsWith("个人记录/每日/") ? active.basename : "";
   const dateText = getDateFromVariables(variables) || activeDate || formatDate(new Date());
-  const path = `40_个人写作/日记/${dateText}.md`;
+  const path = `个人写作/日记/${dateText}.md`;
   const file = await createIfMissing(app, path, "");
   await replaceDailyDiaryButton(app, dateText, path);
   await app.workspace.getLeaf(false).openFile(file);
@@ -30,7 +30,7 @@ async function createIfMissing(app, path, content) {
 }
 
 async function replaceDailyDiaryButton(app, dateText, diaryPath) {
-  const dailyPath = `20_每日记录/个人/${dateText}.md`;
+  const dailyPath = `个人记录/每日/${dateText}.md`;
   const dailyFile = app.vault.getAbstractFileByPath(dailyPath);
   if (!dailyFile) return;
 

@@ -37,15 +37,17 @@ def plugin_data_path(vault_root: Path, plugin_id: str) -> Path:
     return target
 
 
-def configure_calendar(vault_root: Path, config_root: Path, enabled: set[str], mode: str = "personal") -> None:
+def configure_calendar(vault_root: Path, config_root: Path, enabled: set[str], mode: str = "personal", preserve: bool = False) -> None:
     if not plugin_is_ready(vault_root, enabled, "calendar"):
         print("可选工作流未配置：Calendar Weekly 创建（插件未安装并启用）。")
         return
     target = plugin_data_path(vault_root, "calendar")
     current = load_json(target) if target.exists() else {}
-    current.update(load_json(config_root / "calendar.json"))
-    if mode == "work":
-        current.update(weeklyNoteFolder="21_每周记录/工作", weeklyNoteTemplate="工作模板/每周记录.md")
+    if not preserve:
+        current.update(load_json(config_root / "calendar.json"))
+        if mode == "work":
+            current["weeklyNoteTemplate"] = "工作模板/每周记录.md"
+    current["weeklyNoteFolder"] = "工作记录/每周" if mode == "work" else "个人记录/每周"
     write_json(target, current)
     print("已配置可选工作流：Calendar Weekly 创建。")
 
@@ -71,7 +73,7 @@ def configure_quickadd(vault_root: Path, config_root: Path, enabled: set[str], m
     print("已配置可选工作流：QuickAdd Routine 自动化。")
 
 
-def configure_daily_notes(vault_root: Path, config_root: Path, mode: str = "personal") -> None:
+def configure_daily_notes(vault_root: Path, config_root: Path, mode: str = "personal", preserve: bool = False) -> None:
     core_path = vault_root / ".obsidian" / "core-plugins.json"
     if not core_path.exists() or not load_json(core_path).get("daily-notes", False):
         return
@@ -79,9 +81,11 @@ def configure_daily_notes(vault_root: Path, config_root: Path, mode: str = "pers
     if target.is_symlink():
         raise RuntimeError(f"拒绝写入符号链接：{target}")
     current = load_json(target) if target.exists() else {}
-    current.update(load_json(config_root / "daily-notes.json"))
-    if mode == "work":
-        current.update(folder="20_每日记录/工作", template="工作模板/每日记录.md")
+    if not preserve:
+        current.update(load_json(config_root / "daily-notes.json"))
+        if mode == "work":
+            current["template"] = "工作模板/每日记录.md"
+    current["folder"] = "工作记录/每日" if mode == "work" else "个人记录/每日"
     write_json(target, current)
     print("已配置 Daily Notes 记录目录和模板。")
 
@@ -100,9 +104,8 @@ def main() -> int:
     config_root = Path(__file__).resolve().parent.parent / "config" / "obsidian"
     enabled_path = args.vault_root / ".obsidian" / "community-plugins.json"
     enabled = set(load_json(enabled_path)) if enabled_path.is_file() else set()
-    if not args.preserve_templates:
-        configure_daily_notes(args.vault_root, config_root, args.mode)
-        configure_calendar(args.vault_root, config_root, enabled, args.mode)
+    configure_daily_notes(args.vault_root, config_root, args.mode, args.preserve_templates)
+    configure_calendar(args.vault_root, config_root, enabled, args.mode, args.preserve_templates)
     configure_quickadd(args.vault_root, config_root, enabled, args.mode)
     return 0
 

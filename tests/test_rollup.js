@@ -80,10 +80,10 @@ function makeApp(initialFiles) {
 function baseFiles() {
   return {
     "个人模板/每日记录.md": "## 计划\n\n## 记录\n\n### 打卡\n- [ ] 学习阅读：\n- [ ] 运动健身：\n\n### 日记",
-    "20_每日记录/个人/2026-06-29.md": "### 打卡\n- [x] 学习阅读：书 A\n- [ ] 运动健身：跑步\n### 日记\n- [x] 不应统计",
-    "20_每日记录/个人/2026-07-05.md": "### 打卡\n- [ ] 学习阅读：书 B\n- [x] 临时事项 | 户外",
-    "21_每周记录/个人/2026-W27.md": "## 计划\n人工计划\n## 记录\n<!-- SN:weekly:auto:start -->\n<!-- SN:weekly:auto:end -->\n### 总结\n人工总结",
-    "22_每月记录/个人/2026-07.md": "## 计划\n月计划\n## 记录\n<!-- SN:monthly:auto:start -->\n<!-- SN:monthly:auto:end -->\n### 总结\n月总结",
+    "个人记录/每日/2026-06-29.md": "### 打卡\n- [x] 学习阅读：书 A\n- [ ] 运动健身：跑步\n### 日记\n- [x] 不应统计",
+    "个人记录/每日/2026-07-05.md": "### 打卡\n- [ ] 学习阅读：书 B\n- [x] 临时事项 | 户外",
+    "个人记录/每周/2026-W27.md": "## 计划\n人工计划\n## 记录\n<!-- SN:weekly:auto:start -->\n<!-- SN:weekly:auto:end -->\n### 总结\n人工总结",
+    "个人记录/每月/2026-07.md": "## 计划\n月计划\n## 记录\n<!-- SN:monthly:auto:start -->\n<!-- SN:monthly:auto:end -->\n### 总结\n月总结",
   };
 }
 
@@ -91,7 +91,7 @@ async function testWeekly() {
   const fixture = makeApp(baseFiles());
   const params = { app: fixture.app, variables: { week: "2026-W27" } };
   await rollup(params, { period: "week" });
-  const pathname = "21_每周记录/个人/2026-W27.md";
+  const pathname = "个人记录/每周/2026-W27.md";
   const output = fixture.files.get(pathname);
   assert.match(output, /\| 学习阅读 \| 1 \| 2 \| 50% \|/);
   assert.match(output, /\| 运动健身 \| 0 \| 1 \| 0% \|/);
@@ -108,11 +108,11 @@ async function testWeekly() {
 async function testMonth() {
   const files = baseFiles();
   for (const week of ["27", "28", "29", "30", "31"]) {
-    files[`21_每周记录/个人/2026-W${week}.md`] = "### 打卡统计\n| 学习阅读 | 1 | 2 | 50% |\n| 已取消项目 | 1 | 2 | 50% |";
+    files[`个人记录/每周/2026-W${week}.md`] = "### 打卡统计\n| 学习阅读 | 1 | 2 | 50% |\n| 已取消项目 | 1 | 2 | 50% |";
   }
   const fixture = makeApp(files);
   await rollup({ app: fixture.app, variables: { month: "2026-07" } }, { period: "month" });
-  const output = fixture.files.get("22_每月记录/个人/2026-07.md");
+  const output = fixture.files.get("个人记录/每月/2026-07.md");
   assert.match(output, /\| 学习阅读 \| 4 \| 8 \| 50% \|/);
   for (const week of ["27", "28", "29", "30"]) assert.match(output, new RegExp(`W${week}`));
   assert.doesNotMatch(output, /W31/);
@@ -125,16 +125,16 @@ async function testNoCreationOrOverwrite() {
   const fixture = makeApp(baseFiles());
   const before = new Map(fixture.files);
   await assert.rejects(rollup({ app: fixture.app, variables: { week: "2026-W40" } }, { period: "week" }), /先.*创建/);
-  fixture.files.set("21_每周记录/个人/2026-W27.md", "人工内容");
+  fixture.files.set("个人记录/每周/2026-W27.md", "人工内容");
   await assert.rejects(rollup({ app: fixture.app, variables: { week: "2026-W27" } }, { period: "week" }), /缺少统计块/);
-  assert.equal(fixture.files.get("21_每周记录/个人/2026-W27.md"), "人工内容");
+  assert.equal(fixture.files.get("个人记录/每周/2026-W27.md"), "人工内容");
   assert.equal(fixture.files.size, before.size);
 }
 
 async function testDailyAndDiary() {
   const fixture = makeApp({ "个人模板/每日记录.md": repoText("templates/每日记录.md") });
   await createDaily({ app: fixture.app, variables: { date: "2026-07-13" } });
-  const pathname = "20_每日记录/个人/2026-07-13.md";
+  const pathname = "个人记录/每日/2026-07-13.md";
   const content = fixture.files.get(pathname);
   assert.match(content, /2026-W29/);
   assert.match(content, /value-date=2026-07-13/);
@@ -144,9 +144,9 @@ async function testDailyAndDiary() {
   await createDaily({ app: fixture.app, variables: { date: "2026-07-13" } });
   assert.equal(fixture.files.get(pathname), content + "\n人工补充");
   await createDiary({ app: fixture.app, variables: { date: "2026-07-13" } });
-  const diary = "40_个人写作/日记/2026-07-13.md";
+  const diary = "个人写作/日记/2026-07-13.md";
   assert.equal(fixture.files.get(diary), "");
-  assert.match(fixture.files.get(pathname), /\[\[40_个人写作\/日记\/2026-07-13/);
+  assert.match(fixture.files.get(pathname), /\[\[个人写作\/日记\/2026-07-13/);
   fixture.files.set(diary, "日记正文");
   fixture.app.workspace.getActiveFile = () => file(pathname);
   await createDiary({ app: fixture.app });
@@ -157,7 +157,7 @@ async function testWorkDaily() {
   const fixture = makeApp({ "工作模板/每日记录.md": repoText("templates/work/每日记录.md") });
   const params = { app: fixture.app, variables: { date: "2026-07-13" } };
   await createDaily(params, { mode: "work" });
-  const pathname = "20_每日记录/工作/2026-07-13.md";
+  const pathname = "工作记录/每日/2026-07-13.md";
   const content = fixture.files.get(pathname);
   assert.match(content, /2026-W29/);
   assert.doesNotMatch(content, /个人|日记|打卡|\{\{/);

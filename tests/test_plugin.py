@@ -61,6 +61,11 @@ class PluginTests(unittest.TestCase):
             self.assertFalse((package / "skills/skill-validation").exists())
             self.assertEqual((package / "skills/sunday-note-query/SKILL.md").read_bytes(),
                              (ROOT / "skills/sunday-note-query/SKILL.md").read_bytes())
+            templates = Path("skills/sunday-note-ingest/assets/项目维护")
+            self.assertEqual({p.name for p in (package / templates).iterdir()},
+                             {"项目总览.md", "项目架构.md", "项目计划.md", "项目记录.md"})
+            for template in (ROOT / templates).iterdir():
+                self.assertEqual((package / templates / template.name).read_bytes(), template.read_bytes())
             self.assertFalse((package / "hooks").exists())
             self.assertFalse((package / "plugin").exists())
             self.assertFalse((package / "automation").exists())
@@ -90,7 +95,7 @@ class PluginTests(unittest.TestCase):
         local_paths = [self.vault / ".agents/skills/other-tool",
                        self.root / "codex/config.toml"]
         local_hashes = {p: migration.fingerprint(p) for p in local_paths}
-        note = self.vault / "30_知识库/fixture.md"
+        note = self.vault / "知识库/fixture.md"
         note.write_text("human knowledge")
         with patch.object(migration, "run", self.fake_run):
             migration.apply(plan)
@@ -105,7 +110,12 @@ class PluginTests(unittest.TestCase):
             self.assertTrue((self.vault / ".agents/skills/sunday-note-query/SKILL.md").is_file())
             self.assertEqual(note.read_text(), "human knowledge")
             migration.apply(migration.inspect(self.vault, ROOT))
+            config = self.root / "config/sunday-note-agent/config.json"
+            binding = read_json(config, {})
+            binding["work_wiki_roots"] = ["知识库/已批准"]
+            config.write_text(json.dumps(binding))
             migration.apply(migration.inspect(self.vault, ROOT))
+            self.assertEqual(read_json(config, {})["work_wiki_roots"], ["知识库/已批准"])
             self.assertEqual((self.root / "codex/hooks.json").read_bytes(), old_hooks)
         self.assertTrue(any(c[:3] == ["codex", "plugin", "add"] for c in self.calls))
 

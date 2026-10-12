@@ -27,15 +27,13 @@ from typing import Any, Iterable, Sequence
 
 SCHEMA_VERSION = 2
 ALLOWED_SOURCE_ROOTS = {
-    "10_原始材料",
-    "20_每日记录",
-    "21_每周记录",
-    "22_每月记录",
-    "23_项目复盘",
-    "30_知识库",
+    "工作资料", "个人资料",
+    "工作记录", "个人记录",
+    "工作项目", "个人项目", "SundayNoteAgent项目",
+    "知识库",
     "assets",
 }
-SYSTEM_FILES = ("AGENTS.md", "首页.md", "个人上下文.md")
+SYSTEM_FILES = ("AGENTS.md", "首页.md", ".sunday-note-agent/install-mode")
 SYSTEM_DIRS = tuple(sorted(ALLOWED_SOURCE_ROOTS))
 KNOWLEDGE_SKILL_DIRS = tuple(
     f".agents/skills/{name}"
@@ -169,8 +167,11 @@ def safe_relative_path(value: Any, label: str, *, write_scope: bool = False) -> 
     if path.is_absolute() or ".." in path.parts or "." in path.parts or not path.parts:
         raise DiagnosticError(f"{label} must be a normalized relative path: {raw}")
     root = path.parts[0]
-    allowed = {"30_知识库"} if write_scope else ALLOWED_SOURCE_ROOTS
-    if root not in allowed:
+    maintenance = path.parts[2:] if root in {"工作项目", "个人项目"} else path.parts[1:] if root == "SundayNoteAgent项目" else ()
+    maintenance_file = len(maintenance) == 2 and maintenance[0] == "项目维护" and maintenance[1] in {
+        "项目总览.md", "项目架构.md", "项目计划.md", "项目记录.md"}
+    writable_layer = root in {"知识库", "工作资料", "个人资料"} and len(path.parts) > 1
+    if (write_scope and not writable_layer and not maintenance_file) or (not write_scope and root not in ALLOWED_SOURCE_ROOTS):
         raise DiagnosticError(f"{label} is outside fixed vault layers: {raw}")
     return path.as_posix()
 
@@ -487,7 +488,7 @@ def bind_system_identity(agent_source: Path, vault_root: Path, plugin_root: Path
         mismatches.append("AGENTS.md managed section")
     if mismatches:
         raise DiagnosticError(f"deployed agent identity differs from agent-source: {', '.join(mismatches)}")
-    personal = vault_root / "个人上下文.md"
+    personal = vault_root / "个人记录/个人上下文.md"
     return {
         "git": git_identity(agent_source),
         "deployment": "plugin" if plugin_root else "standalone",

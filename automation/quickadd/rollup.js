@@ -1,6 +1,6 @@
-const DAILY = "20_每日记录/个人";
-const WEEKLY = "21_每周记录/个人";
-const MONTHLY = "22_每月记录/个人";
+const DAILY = "个人记录/每日";
+const WEEKLY = "个人记录/每周";
+const MONTHLY = "个人记录/每月";
 
 module.exports = async function rollup({ app, variables = {} }, settings = {}) {
   const period = settings.period;

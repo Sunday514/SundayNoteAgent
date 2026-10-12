@@ -6,9 +6,13 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import sys
 from pathlib import Path
 from typing import Iterable
 from urllib.parse import unquote
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "sunday-note-query/scripts"))
+from vault_scope import wiki_access, require_scope, no_symlink
 
 
 WIKILINK_RE = re.compile(r"(?<!!)\[\[([^\]]+)\]\]")
@@ -31,6 +35,7 @@ IGNORED_SCHEMES = ("http://", "https://", "mailto:", "obsidian://")
 def parse_args() -> tuple[argparse.Namespace, argparse.ArgumentParser]:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", default=".", help="Vault root used for paths and output.")
+    parser.add_argument("--mode", choices=("work", "personal"))
     parser.add_argument("--wiki-entry", required=True, help="Wiki navigation entry Markdown file.")
     parser.add_argument("--wiki-scope", action="append", required=True, help="Wiki file or directory. Repeatable.")
     parser.add_argument("--raw-scope", action="append", default=[], help="Raw file or directory. Repeatable.")
@@ -52,6 +57,7 @@ def resolve_input(raw: str, root: Path, parser: argparse.ArgumentParser | None =
     path = Path(raw)
     if not path.is_absolute():
         path = root / path
+    no_symlink(path, root)
     path = path.resolve()
     if not inside_root(path, root):
         message = f"path is outside --root: {raw}"
@@ -86,6 +92,8 @@ def collect_scope(raw_scopes: Iterable[str], root: Path, parser: argparse.Argume
             files.add(path)
         else:
             for item in path.rglob("*.md"):
+                if item.is_symlink():
+                    continue
                 resolved = item.resolve()
                 if not inside_root(resolved, root):
                     parser.error(f"scope contains a path outside --root: {item}")
@@ -219,6 +227,17 @@ def audit(args: argparse.Namespace, parser: argparse.ArgumentParser) -> dict:
     root = Path(args.root).resolve()
     if not root.is_dir():
         parser.error(f"--root is not a directory: {args.root}")
+
+    try:
+        mode, allowed = wiki_access(root, args.mode)
+        for scope in [args.wiki_entry, *args.wiki_scope]:
+            require_scope(Path(scope), root, allowed)
+        domains = ["工作"] + (["个人"] if mode == "personal" else [])
+        for scopes, layer in ((args.raw_scope, "资料"), (args.routine_scope, "记录")):
+            for scope in scopes:
+                require_scope(Path(scope), root, [root / (domain + layer) for domain in domains])
+    except (ValueError, OSError) as exc:
+        parser.error(str(exc))
 
     wiki_all = collect_scope(args.wiki_scope, root, parser)
     raw_all = collect_scope(args.raw_scope, root, parser)

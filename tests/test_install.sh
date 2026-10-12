@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP_ROOT="$(mktemp -d)"
+export XDG_CONFIG_HOME="$TMP_ROOT/config"
 trap 'rm -rf "$TMP_ROOT"' EXIT
 
 fail() {
@@ -47,7 +48,7 @@ make_command_path() {
 }
 
 shell_only_path="$TMP_ROOT/shell-only-bin"
-make_command_path "$shell_only_path" bash cat chmod cp dirname grep mkdir mktemp rm tail touch
+make_command_path "$shell_only_path" bash cat chmod cp dirname grep mkdir mktemp rm tail touch python3
 
 vault="$TMP_ROOT/vault"
 mkdir -p "$vault/SundayNoteAgent"
@@ -55,7 +56,7 @@ mkdir -p "$vault/SundayNoteAgent"
 install_output="$(PATH="$shell_only_path" "$shell_only_path/bash" "$ROOT/install/install.sh" --vault-root "$vault")"
 
 test -f "$vault/AGENTS.md" || fail "new vault is missing AGENTS.md"
-test -f "$vault/个人上下文.md" || fail "new vault is missing root personal context"
+test -f "$vault/个人记录/个人上下文.md" || fail "new vault is missing root personal context"
 test -f "$vault/个人模板/每日记录.md" || fail "new vault is missing Daily template"
 test ! -e "$vault/.agents/skills/paper-summarizer" || fail "optional skill was installed without opt-in"
 test ! -e "$vault/.obsidian/community-plugins.json" || fail "installer created a community plugin baseline"
@@ -66,35 +67,27 @@ assert_output_contains "$install_output" "可选工作流未配置：QuickAdd Ro
 assert_output_contains "$install_output" "安装期间应关闭 Obsidian"
 for required_dir in \
   .import_files \
-  10_原始材料 \
-  20_每日记录 \
-  21_每周记录 \
-  22_每月记录 \
-  23_项目复盘 \
-  30_知识库 \
-  40_个人写作 \
+  知识库 \
+  个人写作 \
   个人模板 \
-  10_原始材料/工作 \
-  10_原始材料/个人 \
-  20_每日记录/工作 \
-  20_每日记录/个人 \
-  21_每周记录/工作 \
-  21_每周记录/个人 \
-  22_每月记录/工作 \
-  22_每月记录/个人 \
-  23_项目复盘/工作 \
-  23_项目复盘/个人 \
-  assets/工作/figures \
-  assets/个人/figures; do
+  工作资料 \
+  个人资料 \
+  工作记录/每日 \
+  个人记录/每日 \
+  工作记录/每周 \
+  个人记录/每周 \
+  工作记录/每月 \
+  个人记录/每月 \
+  工作项目 \
+  个人项目; do
   test -d "$vault/$required_dir" || fail "new vault is missing fixed directory: $required_dir"
 done
 assert_file_contains "$vault/.stignore" "/SundayNoteAgent"
 assert_file_contains "$vault/.stignore" "/.import_files"
-{ printf '%s\n' '// BEGIN SundayNoteAgent managed ignores'; cat "$ROOT/install/scaffold/.stignore"; printf '%s\n' '// END SundayNoteAgent managed ignores'; } > "$TMP_ROOT/personal-stignore"
-assert_same_file "$TMP_ROOT/personal-stignore" "$vault/.stignore"
+assert_file_contains "$vault/.stignore" '// 其余全部忽略'
 { cat "$ROOT/install/scaffold/AGENTS.md"; printf '\n'; cat "$ROOT/install/scaffold/personal.md"; } > "$TMP_ROOT/personal-agents.md"
 assert_same_file "$TMP_ROOT/personal-agents.md" "$vault/AGENTS.md"
-assert_same_file "$ROOT/install/scaffold/个人上下文.md" "$vault/个人上下文.md"
+assert_same_file "$ROOT/install/scaffold/个人上下文.md" "$vault/个人记录/个人上下文.md"
 
 assert_same_file "$ROOT/templates/每周记录.md" "$vault/个人模板/每周记录.md"
 assert_file_contains "$vault/个人模板/每周记录.md" "value-week={{title}}"
@@ -165,7 +158,7 @@ assert_output_contains "$integration_output" "已配置可选工作流：Calenda
 assert_output_contains "$integration_output" "已配置可选工作流：QuickAdd Routine 自动化。"
 assert_same_file "$TMP_ROOT/community-plugins.before.json" "$integrated/.obsidian/community-plugins.json"
 
-assert_file_contains "$integrated/.obsidian/daily-notes.json" '"folder": "20_每日记录/个人"'
+assert_file_contains "$integrated/.obsidian/daily-notes.json" '"folder": "个人记录/每日"'
 assert_file_contains "$integrated/.obsidian/daily-notes.json" '"autorun": true'
 test ! -e "$integrated/assets/figures" || fail "installer recreated an unpartitioned asset directory"
 calendar_data="$integrated/.obsidian/plugins/calendar/data.json"
@@ -173,7 +166,7 @@ assert_file_contains "$calendar_data" '"weekStart": "sunday"'
 assert_file_contains "$calendar_data" '"showWeeklyNote": true'
 assert_file_contains "$calendar_data" '"weeklyNoteFormat": "gggg-[W]ww"'
 assert_file_contains "$calendar_data" '"weeklyNoteTemplate": "个人模板/每周记录.md"'
-assert_file_contains "$calendar_data" '"weeklyNoteFolder": "21_每周记录/个人"'
+assert_file_contains "$calendar_data" '"weeklyNoteFolder": "个人记录/每周"'
 
 quickadd_data="$integrated/.obsidian/plugins/quickadd/data.json"
 assert_file_contains "$quickadd_data" '"id": "custom-choice"'
@@ -235,7 +228,7 @@ cat > "$preserved/.obsidian/plugins/calendar/data.json" <<'EOF'
   "showWeeklyNote": true,
   "weeklyNoteFormat": "YYYY-[W]WW",
   "weeklyNoteTemplate": "个人模板/周记录模板.md",
-  "weeklyNoteFolder": "21_每周记录/个人"
+  "weeklyNoteFolder": "自定义旧周记"
 }
 EOF
 printf '%s\n' '{"choices":[]}' > "$preserved/.obsidian/plugins/quickadd/data.json"
@@ -250,7 +243,12 @@ assert_same_file "$TMP_ROOT/preserved-templates.before/月记录模板.md" "$pre
 test ! -e "$preserved/个人模板/每日记录.md" || fail "preserve mode created a Daily template"
 test ! -e "$preserved/个人模板/每周记录.md" || fail "preserve mode created a Weekly template"
 test ! -e "$preserved/个人模板/每月记录.md" || fail "preserve mode created a monthly template"
-assert_same_file "$TMP_ROOT/preserved-calendar.before.json" "$preserved/.obsidian/plugins/calendar/data.json"
+python3 - "$TMP_ROOT/preserved-calendar.before.json" "$preserved/.obsidian/plugins/calendar/data.json" <<'PY'
+import json, sys
+before, after = (json.load(open(p)) for p in sys.argv[1:])
+before['weeklyNoteFolder'] = '个人记录/每周'
+assert before == after
+PY
 assert_file_contains "$preserved/.obsidian/plugins/quickadd/data.json" '"name": "统计本周打卡"'
 
 symlink_vault="$TMP_ROOT/symlink-vault"
@@ -266,13 +264,13 @@ test -f "$symlink_vault/AGENTS.md" || fail "optional integration failure blocked
 assert_output_contains "$symlink_output" "拒绝写入符号链接"
 assert_file_contains "$outside_calendar" '"outside":"unchanged"'
 
-cat > "$vault/30_知识库/集成测试.md" <<'EOF'
+cat > "$vault/知识库/集成测试.md" <<'EOF'
 ---
 last_updated: 2026-07-13
 update_count: 1
 last_queried: ""
 query_count: 0
-sources: ["[[10_原始材料/集成来源]]"]
+sources: ["[[工作资料/集成来源]]"]
 topic: "集成测试"
 keywords: ["唯一集成词"]
 ---
@@ -281,10 +279,10 @@ keywords: ["唯一集成词"]
 
 唯一集成词。
 
-[[10_原始材料/集成来源]]
-[[20_每日记录/个人/2026-07-13]]
+[[工作资料/集成来源]]
+[[个人记录/每日/2026-07-13]]
 EOF
-cat > "$vault/30_知识库/索引.md" <<'EOF'
+cat > "$vault/知识库/索引.md" <<'EOF'
 ---
 last_updated: 2026-07-13
 update_count: 1
@@ -297,58 +295,57 @@ keywords: ["索引"]
 
 [[集成测试]]
 EOF
-printf '%s\n' "# 集成来源" > "$vault/10_原始材料/集成来源.md"
-printf '%s\n' "唯一集成词只应作为直接来源读取。" > "$vault/20_每日记录/个人/2026-07-13.md"
+printf '%s\n' "# 集成来源" > "$vault/工作资料/集成来源.md"
+printf '%s\n' "唯一集成词只应作为直接来源读取。" > "$vault/个人记录/每日/2026-07-13.md"
 
 query_output="$(python "$vault/.agents/skills/sunday-note-query/scripts/query_search.py" \
   "唯一集成词" --vault-root "$vault")"
-assert_file_contains <(printf '%s' "$query_output") "30_知识库/集成测试.md"
-if grep -Fq "20_每日记录" <<< "$query_output"; then
+assert_file_contains <(printf '%s' "$query_output") "知识库/集成测试.md"
+if grep -Fq "个人记录/每日" <<< "$query_output"; then
   fail "installed Query searched Routine directly"
 fi
 
 test ! -e "$vault/.agents/skills/sunday-note-query/scripts/update_query_header.py" || fail "query updater installed"
-assert_file_contains "$vault/30_知识库/集成测试.md" "query_count: 0"
-assert_file_contains "$vault/30_知识库/集成测试.md" "唯一集成词。"
+assert_file_contains "$vault/知识库/集成测试.md" "query_count: 0"
+assert_file_contains "$vault/知识库/集成测试.md" "唯一集成词。"
 
-lint_output="$(python "$vault/.agents/skills/sunday-note-lint/scripts/lint_headers.py" \
-  --root "$vault" --scope "30_知识库/集成测试.md" --format json)"
-assert_file_contains <(printf '%s' "$lint_output") '"issue_files": 0'
+test ! -e "$vault/.agents/skills/sunday-note-lint/scripts/lint_headers.py" || fail "obsolete header checker installed"
 
 audit_output="$(python "$vault/.agents/skills/sunday-note-lint/scripts/audit_reachability.py" \
   --root "$vault" \
-  --wiki-entry "30_知识库/索引.md" \
-  --wiki-scope "30_知识库/索引.md" \
-  --wiki-scope "30_知识库/集成测试.md" \
-  --raw-scope "10_原始材料/集成来源.md" \
-  --routine-scope "20_每日记录/个人/2026-07-13.md" \
+  --wiki-entry "知识库/索引.md" \
+  --wiki-scope "知识库/索引.md" \
+  --wiki-scope "知识库/集成测试.md" \
+  --raw-scope "工作资料/集成来源.md" \
+  --routine-scope "个人记录/每日/2026-07-13.md" \
   --format json)"
 assert_file_contains <(printf '%s' "$audit_output") '"wiki_unreachable": []'
 assert_file_contains <(printf '%s' "$audit_output") '"raw_unlinked": []'
 
 printf '%s\n' "local template" > "$vault/个人模板/每日记录.md"
 printf '%s\n' "stale managed rule" > "$vault/AGENTS.md"
-printf '%s\n' "personal context sentinel" >> "$vault/个人上下文.md"
+printf '%s\n' "personal context sentinel" >> "$vault/个人记录/个人上下文.md"
 printf '%s\n' "stale managed script" > "$vault/.agents/skills/sunday-note-query/scripts/query_search.py"
 printf '%s\n' "extra skill file" > "$vault/.agents/skills/sunday-note-query/local.md"
 printf '%s\n' "old query updater" > "$vault/.agents/skills/sunday-note-query/scripts/update_query_header.py"
+printf '%s\n' "old header checker" > "$vault/.agents/skills/sunday-note-lint/scripts/lint_headers.py"
 printf '%s\n' "local query helper" > "$vault/.agents/skills/sunday-note-query/scripts/local.py"
 printf '%s\n' "local ignore" > "$vault/.stignore"
 
 snapshot="$TMP_ROOT/local-content"
 mkdir -p "$snapshot"
 cp "$vault/个人模板/每日记录.md" "$snapshot/template"
-cp "$vault/10_原始材料/集成来源.md" "$snapshot/raw"
-cp "$vault/20_每日记录/个人/2026-07-13.md" "$snapshot/routine"
-cp "$vault/30_知识库/集成测试.md" "$snapshot/wiki"
-cp "$vault/个人上下文.md" "$snapshot/personal-context"
+cp "$vault/工作资料/集成来源.md" "$snapshot/raw"
+cp "$vault/个人记录/每日/2026-07-13.md" "$snapshot/routine"
+cp "$vault/知识库/集成测试.md" "$snapshot/wiki"
+cp "$vault/个人记录/个人上下文.md" "$snapshot/personal-context"
 
 assert_local_content_unchanged() {
   assert_same_file "$snapshot/template" "$vault/个人模板/每日记录.md"
-  assert_same_file "$snapshot/raw" "$vault/10_原始材料/集成来源.md"
-  assert_same_file "$snapshot/routine" "$vault/20_每日记录/个人/2026-07-13.md"
-  assert_same_file "$snapshot/wiki" "$vault/30_知识库/集成测试.md"
-  assert_same_file "$snapshot/personal-context" "$vault/个人上下文.md"
+  assert_same_file "$snapshot/raw" "$vault/工作资料/集成来源.md"
+  assert_same_file "$snapshot/routine" "$vault/个人记录/每日/2026-07-13.md"
+  assert_same_file "$snapshot/wiki" "$vault/知识库/集成测试.md"
+  assert_same_file "$snapshot/personal-context" "$vault/个人记录/个人上下文.md"
 }
 
 mkdir -p "$vault/.agents/skills/sunday-note-context/assets"
@@ -364,6 +361,7 @@ assert_file_contains "$vault/AGENTS.md" "Agent"
 assert_file_contains "$vault/个人模板/每日记录.md" "local template"
 assert_file_contains "$vault/.agents/skills/sunday-note-query/local.md" "extra skill file"
 test ! -e "$vault/.agents/skills/sunday-note-query/scripts/update_query_header.py" || fail "obsolete query updater remains"
+test ! -e "$vault/.agents/skills/sunday-note-lint/scripts/lint_headers.py" || fail "obsolete header checker remains"
 assert_file_contains "$vault/.agents/skills/sunday-note-query/scripts/local.py" "local query helper"
 assert_file_contains "$vault/.stignore" "local ignore"
 assert_file_contains "$vault/.stignore" "/SundayNoteAgent"
@@ -461,15 +459,14 @@ printf '%s\n' '{"id":"quickadd"}' > "$work/.obsidian/plugins/quickadd/manifest.j
 printf '%s\n' '{"daily-notes":true}' > "$work/.obsidian/core-plugins.json"
 printf '%s\n' '{"choices":[{"id":"custom","name":"用户入口"},{"id":"sunday-note-create-diary","name":"创建今日日记"}]}' > "$work/.obsidian/plugins/quickadd/data.json"
 bash "$ROOT/install/install.sh" --vault-root "$work" --mode work --with-paper-summarizer >/dev/null
-for layer in 10_原始材料 20_每日记录 21_每周记录 22_每月记录 23_项目复盘; do
-  test -d "$work/$layer/工作" || fail "work partition missing: $layer"
-  test ! -e "$work/$layer/个人" || fail "work mode created personal partition: $layer"
+for layer in 工作资料 工作记录/每日 工作记录/每周 工作记录/每月 工作项目; do
+  test -d "$work/$layer" || fail "work directory missing: $layer"
 done
-for forbidden in 个人模板 个人上下文.md 40_个人写作 assets/个人 .agents/skills/sunday-note-context; do
+for forbidden in 个人模板 个人上下文.md 个人写作 assets/个人 .agents/skills/sunday-note-context; do
   test ! -e "$work/$forbidden" || fail "work mode created personal content: $forbidden"
 done
-test -d "$work/assets/工作/figures" || fail "work assets missing"
-test -d "$work/30_知识库" || fail "work wiki missing"
+test ! -d "$work/个人记录" || fail "work mode created personal records"
+test -d "$work/知识库" || fail "work wiki missing"
 for name in 每日记录 每周记录 每月记录; do
   assert_same_file "$ROOT/templates/work/$name.md" "$work/工作模板/$name.md"
 done
@@ -478,7 +475,7 @@ assert_source_tree_exported "$ROOT/skills/sunday-note-query" "$work/.agents/skil
 assert_source_tree_exported "$ROOT/skills/paper-summarizer" "$work/.agents/skills/paper-summarizer"
 assert_file_contains "$work/AGENTS.md" '## 工作模式'
 assert_file_contains "$work/.sunday-note-agent/install-mode" 'work'
-assert_file_contains "$work/.obsidian/daily-notes.json" '20_每日记录/工作'
+assert_file_contains "$work/.obsidian/daily-notes.json" '工作记录/每日'
 assert_file_contains "$work/.obsidian/plugins/calendar/data.json" '工作模板/每周记录.md'
 python - "$work" <<'PY'
 import json, sys
@@ -495,7 +492,7 @@ cp "$work/.obsidian/plugins/quickadd/data.json" "$TMP_ROOT/work-quickadd-before"
 bash "$ROOT/install/install.sh" --vault-root "$work" >/dev/null
 assert_same_file "$TMP_ROOT/work-agents-before" "$work/AGENTS.md"
 assert_same_file "$TMP_ROOT/work-quickadd-before" "$work/.obsidian/plugins/quickadd/data.json"
-test ! -e "$work/个人上下文.md" || fail "update forgot work mode"
+test ! -e "$work/个人记录/个人上下文.md" || fail "update forgot work mode"
 
 work_preserved="$TMP_ROOT/work-preserved"
 mkdir -p "$work_preserved/SundayNoteAgent"
@@ -523,7 +520,7 @@ assert_file_contains "$vault/.sunday-note-agent/install-mode" 'personal'
 
 sync_vault="$TMP_ROOT/sync-vault"
 mkdir -p "$sync_vault/SundayNoteAgent"
-printf '%s\n' '!/10_原始材料/个人/**' '#include user.stignore' '/custom-local' > "$sync_vault/.stignore"
+printf '%s\n' '!/个人资料/**' '#include user.stignore' '/custom-local' > "$sync_vault/.stignore"
 cp "$sync_vault/.stignore" "$TMP_ROOT/user-stignore"
 bash "$ROOT/install/install.sh" --vault-root "$sync_vault" --mode work >/dev/null
 python - "$sync_vault/.stignore" "$TMP_ROOT/user-stignore" <<'PY'
@@ -531,12 +528,10 @@ from pathlib import Path
 import sys
 text = Path(sys.argv[1]).read_text()
 assert text.endswith(Path(sys.argv[2]).read_text())
-for layer in ('10_原始材料', '20_每日记录', '21_每周记录', '22_每月记录', '23_项目复盘', 'assets'):
-    assert f'/{layer}/个人\n' in text
-    assert f'/{layer}/工作\n' not in text
-for path in ('40_个人写作', '个人模板', '个人上下文.md', '.import_files', '.logs'):
+assert '!/工作项目' not in text
+for path in ('.import_files', '.logs'):
     assert f'/{path}\n' in text
-assert text.index('/10_原始材料/个人\n') < text.index('!/10_原始材料/个人/**')
+assert text.index('\n*\n') < text.index('!/个人资料/**')
 PY
 cp "$sync_vault/.stignore" "$TMP_ROOT/work-stignore"
 bash "$ROOT/install/install.sh" --vault-root "$sync_vault" >/dev/null
@@ -549,7 +544,7 @@ text = Path(sys.argv[1]).read_text()
 assert text.endswith(Path(sys.argv[2]).read_text())
 managed = text.split('// END SundayNoteAgent managed ignores')[0]
 assert '/.import_files' in managed
-assert '/个人' not in managed and '/40_个人写作' not in managed
+assert '/个人' not in managed and '/个人写作' not in managed
 PY
 
 # Cleanup must reject abnormal targets before any managed content is changed.

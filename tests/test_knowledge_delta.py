@@ -53,6 +53,18 @@ def candidate_dir(run_dir: Path, group_map: dict, scenario: str, group: str) -> 
 
 
 def test_prepare_and_visibility() -> None:
+    for path in ("工作资料/A/结果.md", "个人资料/B/结果.md", "知识库/A/a.md", "SundayNoteAgent项目/项目维护/项目计划.md", "工作项目/A/项目维护/项目架构.md"):
+        assert kdv.safe_relative_path(path, "scope", write_scope=True) == path
+    for path in ("工作项目/A/知识/a.md", "个人项目/B/知识/b.md", "SundayNoteAgent项目/知识/a.md", "工作项目/A/计划.md", "个人项目/B/记录/a.md", "个人写作/a.md", "工作项目/A/项目维护", "工作资料"):
+        try:
+            kdv.safe_relative_path(path, "scope", write_scope=True)
+        except kdv.DiagnosticError:
+            pass
+        else:
+            raise AssertionError(path)
+    scopes = ["工作资料/A/结果.md", "知识库/A/a.md", "工作项目/A/项目维护/项目计划.md"]
+    diff = {"added": scopes + ["工作资料/A/未授权.md"], "removed": [], "modified": ["工作项目/A/正文.md"]}
+    assert kdv.diff_scope_violations(diff, scopes) == ["工作资料/A/未授权.md", "工作项目/A/正文.md"]
     with tempfile.TemporaryDirectory(dir="/tmp") as temp:
         before = kdv.hash_vault_scope(FIXTURE / "vault")
         run_dir, manifest, group_map = prepared_run(temp)
@@ -62,11 +74,12 @@ def test_prepare_and_visibility() -> None:
         query_g = candidate_dir(run_dir, group_map, "query-topic", "G") / "workspace"
         query_o = candidate_dir(run_dir, group_map, "query-topic", "O") / "workspace"
         query_s = candidate_dir(run_dir, group_map, "query-topic", "S") / "workspace"
-        assert not (query_g / "30_知识库").exists()
-        assert (query_o / "30_知识库/主题甲.md").is_file()
-        assert not (query_o / "个人上下文.md").exists()
-        assert (query_s / "个人上下文.md").is_file()
+        assert not (query_g / "知识库").exists()
+        assert (query_o / "知识库/主题甲.md").is_file()
+        assert not (query_o / "个人记录/个人上下文.md").exists()
+        assert (query_s / "个人记录/个人上下文.md").is_file()
         assert (query_s / ".agents/skills/sunday-note-query/SKILL.md").is_file()
+        assert (query_s / ".sunday-note-agent/install-mode").read_text().strip() == "personal"
         assert not (query_s / ".agents/skills/unrelated-helper").exists()
         query_s_run = kdv.load_json(candidate_dir(run_dir, group_map, "query-topic", "S") / "run.json")
         ingest_run = kdv.load_json(candidate_dir(run_dir, group_map, "ingest-no-delta", "S_ingest") / "run.json")
@@ -99,10 +112,10 @@ def test_schema_and_path_rejections() -> None:
         kdv.copy_tree_strict(FIXTURE / "vault", vault)
         outside = temp_path / "outside.md"
         outside.write_text("secret", encoding="utf-8")
-        link = vault / "30_知识库/link.md"
+        link = vault / "知识库/link.md"
         link.symlink_to(outside)
         bad = json.loads(json.dumps(suite))
-        bad["scenarios"][0]["oracle_sources"] = ["30_知识库/link.md"]
+        bad["scenarios"][0]["oracle_sources"] = ["知识库/link.md"]
         try:
             kdv.validate_suite(bad, vault)
         except kdv.DiagnosticError:
@@ -240,12 +253,12 @@ def test_judge_evidence_package() -> None:
     with tempfile.TemporaryDirectory(dir="/tmp") as temp:
         run_dir, manifest, group_map = prepared_run(temp)
         source = candidate_dir(run_dir, group_map, "ingest-no-delta", "S_ingest")
-        page = source / "workspace/30_知识库/主题甲.md"
+        page = source / "workspace/知识库/主题甲.md"
         page.write_text(page.read_text(encoding="utf-8") + "\n新增测试行。\n", encoding="utf-8")
-        kdv.write_diff_evidence(run_dir / "snapshot", source / "workspace", source, ["30_知识库"])
+        kdv.write_diff_evidence(run_dir / "snapshot", source / "workspace", source, ["知识库"])
         kdv.write_json(
             source / "turn-diffs.json",
-            [{"turn": 1, "authorized": True, "added": [], "removed": [], "modified": ["30_知识库/主题甲.md"]}],
+            [{"turn": 1, "authorized": True, "added": [], "removed": [], "modified": ["知识库/主题甲.md"]}],
         )
         kdv.write_json(source / "transcript.json", [{"turn": 1, "user": "请求", "assistant": "完成", "web_events": []}])
         kdv.write_json(source / "status.json", {"status": "completed", "turn_count": 1, "web_event_count": 0})
@@ -257,7 +270,7 @@ def test_judge_evidence_package() -> None:
                     "type": "item.completed",
                     "item": {
                         "type": "command_execution",
-                        "command": "sed -n '1,20p' /workspace/30_知识库/主题甲.md",
+                        "command": "sed -n '1,20p' /workspace/知识库/主题甲.md",
                         "aggregated_output": "证据",
                         "exit_code": 0,
                     },
@@ -269,8 +282,8 @@ def test_judge_evidence_package() -> None:
         package = kdv.prepare_judge_package(run_dir, scenario)
         candidate = package / "candidates" / source.name
         assert "新增测试行" in (candidate / "diff.patch").read_text(encoding="utf-8")
-        assert (candidate / "changes/before/30_知识库/主题甲.md").is_file()
-        assert (candidate / "changes/after/30_知识库/主题甲.md").is_file()
+        assert (candidate / "changes/before/知识库/主题甲.md").is_file()
+        assert (candidate / "changes/after/知识库/主题甲.md").is_file()
         assert kdv.load_json(candidate / "tool-trace.json")[0]["output"] == "证据"
         assert not (package / "comparison-map.json").exists()
 
@@ -313,8 +326,8 @@ def test_jsonl_and_diff() -> None:
             "removed": [],
             "modified": ["changed.md"],
         }
-        diff = {"added": ["30_知识库/new.md", "10_原始材料/raw.md"], "removed": [], "modified": []}
-        assert kdv.diff_scope_violations(diff, ["30_知识库"]) == ["10_原始材料/raw.md"]
+        diff = {"added": ["知识库/new.md", "工作资料/raw.md"], "removed": [], "modified": []}
+        assert kdv.diff_scope_violations(diff, ["知识库"]) == ["工作资料/raw.md"]
 
         evidence_root = Path(temp) / "evidence"
         kdv.write_diff_evidence(before, after, evidence_root, ["changed.md", "added.md"])

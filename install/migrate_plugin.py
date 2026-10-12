@@ -94,6 +94,8 @@ def targets(vault, codex_home, config_dir, data_dir):
     return [config_dir / "config.json", config_dir / "install-mode", data_dir / "marketplace",
             codex_home / "config.toml",
             vault / "AGENTS.md", vault / ".stignore", vault / "SundayNoteTools",
+            vault / ".obsidian/daily-notes.json",
+            vault / ".obsidian/plugins/calendar/data.json",
             vault / ".obsidian/plugins/quickadd/data.json",
             *[vault / ".agents/skills" / name for name in (*CORE, "sunday-note-context", "paper-summarizer")]]
 
@@ -165,6 +167,8 @@ def step(transaction, journal, name, action, paths):
 
 def apply(plan, paper=False, remote_app_id=None):
     vault, source_target = Path(plan["vault"]), Path(plan["source_target"])
+    from migrate_layout import check_layout
+    check_layout(vault)
     config_dir, state_dir, data_dir = map(Path, (plan["config_dir"], plan["state_dir"], plan["data_dir"]))
     codex_home = Path(plan["codex_home"])
     latest = state_dir / "migration.json"
@@ -201,6 +205,9 @@ def apply(plan, paper=False, remote_app_id=None):
         step(transaction, journal, "marketplace", publish_market, [market])
         binding = {"vault": str(vault), "source": str(source_target), "state_dir": str(state_dir),
                    "mode": plan["mode"], **options}
+        previous = read_json(config_dir / "config.json", {})
+        if previous.get("vault") == str(vault) and "work_wiki_roots" in previous:
+            binding["work_wiki_roots"] = previous["work_wiki_roots"]
         step(transaction, journal, "binding", lambda: atomic(config_dir / "config.json", binding), [config_dir / "config.json"])
         step(transaction, journal, "vault-tools", lambda: run("bash", source_target / "install/install.sh", "--vault-root", vault, "--deployment", "plugin",
             "--install-state", config_dir / "install-mode", "--mode", plan["mode"], "--routine-templates", "preserve"),
@@ -218,7 +225,7 @@ def apply(plan, paper=False, remote_app_id=None):
         atomic(transaction / "journal.json", journal)
         raise
     print(json.dumps({"phase": "installed", "transaction": str(transaction),
-          "pending": ["客户端重载与 Skills 发现", "新工作区与 QuickAdd 实测", "旧目录归档"]}, ensure_ascii=False))
+          "pending": ["客户端重载与 Skills 发现", "新工作区与 QuickAdd 实测", "核对设备同步白名单后再恢复同步", "旧目录归档"]}, ensure_ascii=False))
 
 
 def rollback(state_dir):

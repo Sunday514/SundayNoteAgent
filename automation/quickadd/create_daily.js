@@ -5,12 +5,12 @@ module.exports = async function createDaily(params, settings = {}) {
   const date = parseDate(dateText);
   const week = isoWeekId(date);
   const weekday = weekdayName(date);
-  const path = `20_每日记录/${scope}/${dateText}.md`;
+  const path = `${scope}记录/每日/${dateText}.md`;
   let file = app.vault.getAbstractFileByPath(path);
   if (!file) {
     const template = await app.vault.adapter.read(`${scope}模板/每日记录.md`);
     const content = renderTemplate(template, { dateText, week, weekday });
-    await ensureFolder(app, `20_每日记录/${scope}`);
+    await ensureFolder(app, `${scope}记录/每日`);
     file = await app.vault.create(path, content);
   }
   await app.workspace.getLeaf(false).openFile(file);

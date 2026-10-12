@@ -8,7 +8,6 @@ VAULT_ROOT=""
 INSTALL_MODE=""
 WITH_PAPER_SUMMARIZER=0
 ROUTINE_TEMPLATES_MODE="managed"
-OPTIONAL_CONFIG_PYTHON=""
 PERSONAL_CONTEXT_HEADING='## 个性化响应'
 RENDERED_AGENTS=""
 
@@ -109,6 +108,8 @@ else
   exit 2
 fi
 
+command -v python3 >/dev/null || { echo '安装需要 Python 3' >&2; exit 1; }
+python3 "$SCRIPT_DIR/migrate_layout.py" check --vault-root "$VAULT_ROOT"
 mode_file="${INSTALL_STATE:-$VAULT_ROOT/.sunday-note-agent/install-mode}"
 if [ -z "$INSTALL_MODE" ]; then
   if [ -f "$mode_file" ]; then INSTALL_MODE="$(< "$mode_file")"; else INSTALL_MODE=personal; fi
@@ -271,21 +272,17 @@ prepare_managed_agents() {
 }
 
 ensure_vault_dirs() {
-  local layer scope directory
+  local scope directory
   local scopes=(工作)
-  local directories=(.import_files 30_知识库)
+  local directories=(.import_files 知识库)
   if [ "$INSTALL_MODE" = personal ]; then
     scopes+=(个人)
-    directories+=(40_个人写作)
+    directories+=(个人写作)
   fi
   if [ "$ROUTINE_TEMPLATES_MODE" = managed ]; then directories+=("$TEMPLATE_DIR"); fi
-  for layer in 10_原始材料 20_每日记录 21_每周记录 22_每月记录 23_项目复盘; do
-    directories+=("$layer")
-    for scope in "${scopes[@]}"; do
-      directories+=("$layer/$scope")
-    done
+  for scope in "${scopes[@]}"; do
+    directories+=("${scope}资料" "${scope}项目" "${scope}记录/每日" "${scope}记录/每周" "${scope}记录/每月")
   done
-  for scope in "${scopes[@]}"; do directories+=("assets/$scope/figures"); done
   for directory in "${directories[@]}"; do
     mkdir -p "$VAULT_ROOT/$directory"
     touch "$VAULT_ROOT/$directory/.gitkeep"
@@ -293,7 +290,7 @@ ensure_vault_dirs() {
 }
 
 ensure_personal_context_file() {
-  local target="$VAULT_ROOT/个人上下文.md"
+  local target="$VAULT_ROOT/个人记录/个人上下文.md"
 
   if [ -e "$target" ] || [ -L "$target" ]; then
     return
@@ -303,39 +300,7 @@ ensure_personal_context_file() {
 }
 
 ensure_syncthing_ignores() {
-  local target="$VAULT_ROOT/.stignore"
-  local begin='// BEGIN SundayNoteAgent managed ignores'
-  local end='// END SundayNoteAgent managed ignores'
-  local line inside=0 blocks=0 rendered
-  rendered="$(mktemp)"
-  printf '%s\n' "$begin" > "$rendered"
-  cat "$SCAFFOLD_DIR/.stignore" >> "$rendered"
-  if [ "$INSTALL_MODE" = work ]; then cat "$SCAFFOLD_DIR/work.stignore" >> "$rendered"; fi
-  printf '%s\n' "$end" >> "$rendered"
-  if [ -f "$target" ]; then
-    while IFS= read -r line || [ -n "$line" ]; do
-      if [ "${line%$'\r'}" = "$begin" ]; then
-        blocks=$((blocks + 1))
-        if [ "$inside" -eq 1 ] || [ "$blocks" -gt 1 ]; then break; fi
-        inside=1
-      elif [ "${line%$'\r'}" = "$end" ]; then
-        if [ "$inside" -eq 0 ]; then blocks=2; break; fi
-        inside=0
-      elif [ "$inside" -eq 0 ]; then
-        # 接管旧安装追加的公共规则，其余用户规则保持顺序和内容。
-        if ! grep -Fxq -- "${line%$'\r'}" "$SCAFFOLD_DIR/.stignore"; then
-          printf '%s\n' "$line" >> "$rendered"
-        fi
-      fi
-    done < "$target"
-  fi
-  if [ "$inside" -eq 1 ] || [ "$blocks" -gt 1 ]; then
-    rm -f -- "$rendered"
-    echo "无效的 .stignore 托管段：$target" >&2
-    return 1
-  fi
-  copy_managed_file "$rendered" "$target"
-  rm -f -- "$rendered"
+  python3 "$SCRIPT_DIR/sync_allowlist.py" render --vault-root "$VAULT_ROOT"
 }
 
 paper_skill_path="$VAULT_ROOT/.agents/skills/paper-summarizer"
@@ -350,7 +315,6 @@ if [ "$INSTALL_MODE" = work ]; then require_source_file "$SCAFFOLD_DIR/work-home
 require_source_file "$SCAFFOLD_DIR/首页.md"
 require_source_file "$SCAFFOLD_DIR/.gitignore"
 require_source_file "$SCAFFOLD_DIR/.stignore"
-if [ "$INSTALL_MODE" = work ]; then require_source_file "$SCAFFOLD_DIR/work.stignore"; fi
 require_source_file "$SOURCE_ROOT/config/obsidian/calendar.json"
 require_source_file "$SOURCE_ROOT/config/obsidian/daily-notes.json"
 require_source_file "$SOURCE_ROOT/config/obsidian/quickadd.json"
@@ -367,11 +331,6 @@ if [ "$install_paper_summarizer" -eq 1 ]; then
   require_source_dir "$SOURCE_ROOT/skills/paper-summarizer"
 fi
 
-if command -v python3 >/dev/null 2>&1; then
-  OPTIONAL_CONFIG_PYTHON="$(command -v python3)"
-elif command -v python >/dev/null 2>&1; then
-  OPTIONAL_CONFIG_PYTHON="$(command -v python)"
-fi
 
 preflight_container_dir "$VAULT_ROOT/.agents"
 preflight_container_dir "$VAULT_ROOT/.agents/skills"
@@ -387,7 +346,7 @@ preflight_managed_file "$VAULT_ROOT/AGENTS.md"
 preflight_local_file "$VAULT_ROOT/首页.md"
 preflight_local_file "$VAULT_ROOT/.gitignore"
 preflight_append_file "$VAULT_ROOT/.stignore"
-if [ "$INSTALL_MODE" = personal ]; then preflight_local_file "$VAULT_ROOT/个人上下文.md"; fi
+if [ "$INSTALL_MODE" = personal ]; then preflight_local_file "$VAULT_ROOT/个人记录/个人上下文.md"; fi
 if [ "$ROUTINE_TEMPLATES_MODE" = managed ]; then
   preflight_container_dir "$VAULT_ROOT/$TEMPLATE_DIR"
   preflight_local_file "$VAULT_ROOT/$TEMPLATE_DIR/每日记录.md"
@@ -403,6 +362,11 @@ preflight_container_dir "$query_skill"
 preflight_container_dir "$query_skill/scripts"
 obsolete_query_script="$query_skill/scripts/update_query_header.py"
 preflight_managed_file "$obsolete_query_script"
+lint_skill="$VAULT_ROOT/.agents/skills/sunday-note-lint"
+preflight_container_dir "$lint_skill"
+preflight_container_dir "$lint_skill/scripts"
+obsolete_lint_script="$lint_skill/scripts/lint_headers.py"
+preflight_managed_file "$obsolete_lint_script"
 if [ "$install_paper_summarizer" -eq 1 ]; then
   preflight_managed_dir "$paper_skill_path"
 fi
@@ -434,7 +398,7 @@ rm -f -- "$VAULT_ROOT/.agents/skills/sunday-note-context/SKILL.md" \
 for skill in "${CORE_SKILLS[@]}"; do
   copy_managed_dir "$SOURCE_ROOT/skills/$skill" "$VAULT_ROOT/.agents/skills/$skill"
 done
-rm -f -- "$obsolete_query_script"
+rm -f -- "$obsolete_query_script" "$obsolete_lint_script"
 if [ "$install_paper_summarizer" -eq 1 ]; then
   copy_managed_dir "$SOURCE_ROOT/skills/paper-summarizer" "$paper_skill_path"
   rm -f \
@@ -447,17 +411,12 @@ if [ "$install_paper_summarizer" -eq 1 ]; then
 fi
 fi
 
-if [ -n "$OPTIONAL_CONFIG_PYTHON" ]; then
-  optional_config_args=(--vault-root "$VAULT_ROOT" --mode "$INSTALL_MODE")
-  if [ "$ROUTINE_TEMPLATES_MODE" = preserve ]; then
-    optional_config_args+=(--preserve-templates)
-  fi
-  if ! "$OPTIONAL_CONFIG_PYTHON" "$SCRIPT_DIR/configure_optional_integrations.py" "${optional_config_args[@]}"; then
-    echo "可选集成配置失败；核心安装已完成，Calendar/QuickAdd 未全部配置。" >&2
-  fi
-else
-  echo "可选工作流未配置：Calendar Weekly 创建（未找到 python3 或 python；核心安装已完成）。"
-  echo "可选工作流未配置：QuickAdd Routine 自动化（未找到 python3 或 python；核心安装已完成）。"
+optional_config_args=(--vault-root "$VAULT_ROOT" --mode "$INSTALL_MODE")
+if [ "$ROUTINE_TEMPLATES_MODE" = preserve ]; then
+  optional_config_args+=(--preserve-templates)
+fi
+if ! python3 "$SCRIPT_DIR/configure_optional_integrations.py" "${optional_config_args[@]}"; then
+  echo "可选集成配置失败；核心安装已完成，Calendar/QuickAdd 未全部配置。" >&2
 fi
 echo "Installed or updated Sunday Note vault at: $VAULT_ROOT"
 mkdir -p "$(dirname -- "$mode_file")"

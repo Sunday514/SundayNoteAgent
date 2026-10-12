@@ -18,4 +18,4 @@
 .import_files
 ```
 
-导出前先使用 `--dry-run` 检查目标。脚本会在输出目录写入 `manifest.jsonl`，但不会把凭据写入磁盘。转换后的 Markdown 来源材料再进入 `10_原始材料/`。
+导出前先使用 `--dry-run` 检查目标。脚本会在输出目录写入 `manifest.jsonl`，但不会把凭据写入磁盘。转换后的 Markdown 来源材料再进入 `工作资料/`。
