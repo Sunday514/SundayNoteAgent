@@ -20,6 +20,7 @@ python "$ROOT/tests/test_knowledge_delta.py"
 python "$ROOT/tests/test_python_tools.py"
 python "$ROOT/tests/test_plugin.py"
 python "$ROOT/tests/test_project.py"
+python "$ROOT/tests/test_mirror.py"
 python "$ROOT/tests/test_monitor.py"
 python "$ROOT/tests/test_layout.py"
 

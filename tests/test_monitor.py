@@ -24,8 +24,6 @@ class MonitorTests(unittest.TestCase):
             'XDG_CONFIG_HOME': str(self.root / 'config'), 'XDG_STATE_HOME': str(self.root / 'state'),
             'CODEX_HOME': str(self.root / 'codex'), 'CODEX_THREAD_ID': 'maint'})
         self.env.start()
-        self.parent = patch.object(m, 'parent_codex', return_value='/usr/bin/true')
-        self.parent.start()
         self.vault = self.root / 'vault'
         self.vault.mkdir()
         self.repo = self.root / 'repo'
@@ -39,7 +37,6 @@ class MonitorTests(unittest.TestCase):
         m.configure(self.vault, 'p', True, '/usr/bin/true')
 
     def tearDown(self):
-        self.parent.stop()
         self.env.stop()
         self.tmp.cleanup()
 

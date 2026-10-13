@@ -62,6 +62,9 @@ class PluginTests(unittest.TestCase):
             self.assertEqual((package / "skills/sunday-note-query/SKILL.md").read_bytes(),
                              (ROOT / "skills/sunday-note-query/SKILL.md").read_bytes())
             templates = Path("skills/sunday-note-project/assets/项目维护")
+            for resource in ('scripts/mirror_rules.py', 'references/rule-mirror.md'):
+                relative = Path('skills/sunday-note-project') / resource
+                self.assertEqual((package / relative).read_bytes(), (ROOT / relative).read_bytes())
             self.assertFalse((package / "skills/sunday-note-ingest/assets/项目维护").exists())
             self.assertEqual({p.name for p in (package / templates).iterdir()},
                              {"项目总览.md", "项目架构.md", "项目计划.md", "项目记录.md"})

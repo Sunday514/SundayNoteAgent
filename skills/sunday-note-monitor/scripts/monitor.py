@@ -58,21 +58,6 @@ def scrub(text):
                   '[REDACTED]', text)
 
 
-def parent_codex():
-    pid = os.getppid()
-    while pid > 1:
-        try:
-            directory = Path('/proc') / str(pid)
-            executable = (directory / 'exe').resolve(strict=True)
-            if executable.name == 'codex':
-                return str(executable)
-            pid = int(next(s.split()[1] for s in (directory / 'status').read_text().splitlines()
-                           if s.startswith('PPid:')))
-        except (OSError, ValueError, StopIteration):
-            break
-    return ''
-
-
 def collect(vault, event):
     entries = {p: e for p, e in projects(vault).items() if e.get('raw_auto_enabled')}
     if not entries:
@@ -131,7 +116,6 @@ def collect(vault, event):
                 state['issues'][key] = '维护轮次发起内容无法确认，未登记证据'
                 binding.save(path, state)
                 return None
-        # The source CLI may differ from the explicitly verified destination App.
         if prompt.startswith(MARKER):
             if event['session_id'] == entry['maintenance']['session_id']:
                 state['history'][key] = {'kind': 'automatic'}
@@ -141,7 +125,6 @@ def collect(vault, event):
         item = state['pending'].setdefault(key, {k: event[k] for k in
                    ('session_id', 'turn_id', 'cwd', 'transcript_path')})
         item.setdefault('registered_at', time.time())
-        item.setdefault('source_codex', parent_codex())
         event = {**event, 'prompt': prompt}
         for name in ('prompt', 'last_assistant_message'):
             if isinstance(event.get(name), str):

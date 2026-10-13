@@ -44,6 +44,8 @@ python3 skills/sunday-note-project/scripts/project_binding.py unbind --vault-roo
 
 `register` 的 `--source` 可重复，表示完整来源列表；重登记保留维护入口并关闭自动回流。未知来源先确认，冲突拒绝，不自动搬迁绑定。`bind` 保存用户选定的入口，`unbind` 恢复待绑定；这不发送消息。Raw 目录可尚未建立，脚本不创建它。绑定不授予读取、同步或自动写入权限；旧记录目标失效时先修正，不自动猜测新位置。
 
+已接入项目可通过 Project 的[规则镜像](../skills/sunday-note-project/references/rule-mirror.md)提取根 AGENTS 与 `.agents/` 下的 Markdown，保存到 `项目维护/Agent规则/`。脚本随 Project 分发，不需要另配文件列表；显式运行才更新，保留版本清单、不覆盖人工修改、不调整设备同步范围。
+
 ## 文件职责
 
 | 位置 | 内容 |
@@ -135,7 +137,7 @@ python3 "$MONITOR" uninstall --vault-root /path/to/vault
 
 停用停止新采集与投递，已领取批次仍可登记完成；未领取批次保留。卸载前等正在整理的批次完成。部署前人工核对旧 Monitor Hook／MCP，不自动删除其他版本配置。未加载的维护会话可能要打开后才执行排队消息，不承诺关闭状态下后台运行。
 
-投递使用明确验收过的 App Codex 路径，不使用 PATH 中的系统 CLI；来源 CLI 路径只记录为证据。App 升级或连接行为改变后须复验，失败时不启动替代会话。脚本不调用模型，维护会话是唯一整理 Agent；写入范围由 Skill 授权约束，不宣称硬沙箱隔离。
+投递使用明确验收过的 App Codex 路径，不使用 PATH 中的系统 CLI。App 升级或连接行为改变后须复验，失败时不启动替代会话。脚本不调用模型，维护会话是唯一整理 Agent；写入范围由 Skill 授权约束，不宣称硬沙箱隔离。
 
 只登记来源 Codex Home 的 `sessions/` 中可核对身份的持久主会话；side chat、ephemeral、子 Agent 和未知来源均不回流。显式临时标记直接拒绝，无持久转录也拒绝；不会因 cwd 属于项目或会话已绑定而绕过过滤。客户端新增来源格式须先验证，不默认放行。
 
