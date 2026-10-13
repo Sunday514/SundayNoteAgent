@@ -96,6 +96,7 @@ assert_same_file "$ROOT/templates/每月记录.md" "$vault/个人模板/每月�
 assert_file_contains "$vault/个人模板/每月记录.md" "value-month={{title}}"
 assert_file_contains "$vault/个人模板/每月记录.md" "## 记录"
 assert_source_tree_exported "$ROOT/skills/sunday-note-ingest" "$vault/.agents/skills/sunday-note-ingest"
+assert_source_tree_exported "$ROOT/skills/sunday-note-project" "$vault/.agents/skills/sunday-note-project"
 assert_source_tree_exported "$ROOT/skills/sunday-note-lint" "$vault/.agents/skills/sunday-note-lint"
 assert_source_tree_exported "$ROOT/skills/sunday-note-query" "$vault/.agents/skills/sunday-note-query"
 [ ! -f "$vault/.agents/skills/sunday-note-context/SKILL.md" ] || fail "retired Context skill exported"

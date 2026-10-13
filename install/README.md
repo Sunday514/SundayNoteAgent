@@ -27,6 +27,23 @@ python3 install/migrate_plugin.py apply --vault-root /path/to/vault --source-tar
 
 插件不包含生命周期 Hooks，不要求 `SessionStart`。在 vault 项目中读取其根规则；跨项目使用时显式指定 vault，或按需读取本机绑定中的 `vault` 字段并确认目标。不要默认将当前代码仓库当作知识库。
 
+## 项目接入
+
+在选定的项目会话调用 `sunday-note-project`，说明 Vault、项目归属和关联仓库。Skill 建立或核对四文档；普通 Ingest 不要求注册。只有明确指定会话时才绑定维护入口，不依赖当前会话环境自动授权。
+
+绑定保存在 `$XDG_CONFIG_HOME/sunday-note-agent/project-bindings.json`（默认 `~/.config/`），以规范化 Vault 绝对路径为键，下面按项目标识保存项目路径、Raw 路径、来源、维护入口和关闭的回流开关。该文件独立于插件事务，重装、卸载和回退不删除绑定；迁机后须核对来源、路径和会话，不能仅凭旧记录运行。
+
+在源码根目录可以执行以下命令；插件使用自身 Project Skill 内同名脚本：
+
+```bash
+python3 skills/sunday-note-project/scripts/project_binding.py list --vault-root /path/to/vault
+python3 skills/sunday-note-project/scripts/project_binding.py register --vault-root /path/to/vault --project-id project-a --project-path 工作项目/项目甲 --raw-path 工作资料/项目甲 --source /path/to/repo
+python3 skills/sunday-note-project/scripts/project_binding.py bind --vault-root /path/to/vault --project-id project-a --client codex --session-id USER_SELECTED_SESSION
+python3 skills/sunday-note-project/scripts/project_binding.py unbind --vault-root /path/to/vault --project-id project-a
+```
+
+`register` 的 `--source` 可重复，表示完整来源列表；重登记保留维护入口并关闭自动回流。未知来源先确认，冲突拒绝，不自动搬迁绑定。`bind` 保存用户选定的入口，`unbind` 恢复待绑定；这不发送消息。Raw 目录可尚未建立，脚本不创建它。绑定不授予读取、同步或自动写入权限；旧记录目标失效时先修正，不自动猜测新位置。
+
 ## 文件职责
 
 | 位置 | 内容 |

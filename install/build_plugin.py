@@ -7,7 +7,7 @@ from pathlib import Path
 import shutil
 
 SOURCE = Path(__file__).resolve().parents[1]
-CORE = ("sunday-note-query", "sunday-note-ingest", "sunday-note-lint")
+CORE = ("sunday-note-query", "sunday-note-ingest", "sunday-note-lint", "sunday-note-project")
 
 
 def write(path, value):

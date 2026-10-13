@@ -61,7 +61,8 @@ class PluginTests(unittest.TestCase):
             self.assertFalse((package / "skills/skill-validation").exists())
             self.assertEqual((package / "skills/sunday-note-query/SKILL.md").read_bytes(),
                              (ROOT / "skills/sunday-note-query/SKILL.md").read_bytes())
-            templates = Path("skills/sunday-note-ingest/assets/项目维护")
+            templates = Path("skills/sunday-note-project/assets/项目维护")
+            self.assertFalse((package / "skills/sunday-note-ingest/assets/项目维护").exists())
             self.assertEqual({p.name for p in (package / templates).iterdir()},
                              {"项目总览.md", "项目架构.md", "项目计划.md", "项目记录.md"})
             for template in (ROOT / templates).iterdir():
@@ -99,17 +100,22 @@ class PluginTests(unittest.TestCase):
         note.write_text("human knowledge")
         with patch.object(migration, "run", self.fake_run):
             migration.apply(plan)
+            projects = self.root / "config/sunday-note-agent/project-bindings.json"
+            projects.write_text(json.dumps({str(self.vault): {"fixture": {"maintenance": None}}}))
+            project_bytes = projects.read_bytes()
             self.assertFalse((self.vault / ".agents/skills/sunday-note-query").exists())
             self.assertTrue((self.vault / "SundayNoteTools/quickadd/create_daily.js").is_file())
             self.assertEqual(note.read_text(), "human knowledge")
             self.assertEqual((self.root / "codex/hooks.json").read_bytes(), old_hooks)
             self.assertEqual({p: migration.fingerprint(p) for p in local_paths}, local_hashes)
             migration.rollback(Path(plan["state_dir"]))
+            self.assertEqual(projects.read_bytes(), project_bytes)
             self.assertEqual((self.root / "codex/hooks.json").read_bytes(), old_hooks)
             self.assertEqual({p: migration.fingerprint(p) for p in local_paths}, local_hashes)
             self.assertTrue((self.vault / ".agents/skills/sunday-note-query/SKILL.md").is_file())
             self.assertEqual(note.read_text(), "human knowledge")
             migration.apply(migration.inspect(self.vault, ROOT))
+            self.assertEqual(projects.read_bytes(), project_bytes)
             config = self.root / "config/sunday-note-agent/config.json"
             binding = read_json(config, {})
             binding["work_wiki_roots"] = ["知识库/已批准"]
@@ -127,6 +133,14 @@ class PluginTests(unittest.TestCase):
             (self.vault / "AGENTS.md").write_text("new user edit")
             with self.assertRaisesRegex(ValueError, "新修改"):
                 migration.rollback(Path(plan["state_dir"]))
+
+    def test_standalone_work_binding_does_not_change_mode(self):
+        subprocess.run(["bash", str(ROOT / "install/install.sh"), "--vault-root", str(self.vault),
+                        "--mode", "work"], check=True, capture_output=True)
+        config = self.root / "config/sunday-note-agent"
+        config.mkdir(parents=True, exist_ok=True)
+        (config / "project-bindings.json").write_text(json.dumps({str(self.vault): {}}))
+        self.assertEqual(migration.inspect(self.vault, ROOT)["mode"], "work")
 
     def test_prepared_and_interrupted_rollback(self):
         for interrupted in (False, True):

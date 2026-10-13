@@ -117,7 +117,7 @@ fi
 case "$INSTALL_MODE" in personal|work) ;; *) echo "invalid saved install mode: $INSTALL_MODE" >&2; exit 2 ;; esac
 TEMPLATE_DIR=个人模板
 TEMPLATE_SOURCE="$SOURCE_ROOT/templates"
-CORE_SKILLS=(sunday-note-ingest sunday-note-lint sunday-note-query)
+CORE_SKILLS=(sunday-note-ingest sunday-note-lint sunday-note-query sunday-note-project)
 if [ "$INSTALL_MODE" = work ]; then
   TEMPLATE_DIR=工作模板
   TEMPLATE_SOURCE="$SOURCE_ROOT/templates/work"
