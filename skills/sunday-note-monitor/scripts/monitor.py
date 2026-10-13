@@ -79,7 +79,7 @@ def collect(vault, event):
         return None
     if event.get('hook_event_name') not in ('UserPromptSubmit', 'Stop'):
         return None
-    if event.get('agent_id') or event.get('parent_thread_id'):
+    if event.get('agent_id') or event.get('parent_thread_id') or event.get('ephemeral'):
         return None
     if not all(isinstance(event.get(k), str) and event[k] for k in
                ('session_id', 'turn_id', 'cwd', 'transcript_path')):
@@ -87,11 +87,15 @@ def collect(vault, event):
     # Metadata only: an absent or unknown source is not evidence of a persistent main session.
     try:
         transcript = binding.safe_path(event['transcript_path'])
+        sessions = binding.safe_path(Path(os.environ.get('CODEX_HOME', Path.home() / '.codex')) / 'sessions')
+        if not transcript.is_relative_to(sessions):
+            return None
         with transcript.open() as stream:
             meta = json.loads(stream.readline())
         payload = meta['payload']
         if (meta['type'] != 'session_meta' or payload.get('id') != event['session_id'] or
-                isinstance(payload.get('source'), dict)):
+                payload.get('source') not in ('cli', 'vscode') or payload.get('ephemeral') or
+                payload.get('thread_source') in ('side_chat', 'side_conversation', 'ephemeral')):
             return None
     except (OSError, ValueError, KeyError):
         return None

@@ -137,6 +137,8 @@ python3 "$MONITOR" uninstall --vault-root /path/to/vault
 
 投递使用明确验收过的 App Codex 路径，不使用 PATH 中的系统 CLI；来源 CLI 路径只记录为证据。App 升级或连接行为改变后须复验，失败时不启动替代会话。脚本不调用模型，维护会话是唯一整理 Agent；写入范围由 Skill 授权约束，不宣称硬沙箱隔离。
 
+只登记来源 Codex Home 的 `sessions/` 中可核对身份的持久主会话；side chat、ephemeral、子 Agent 和未知来源均不回流。显式临时标记直接拒绝，无持久转录也拒绝；不会因 cwd 属于项目或会话已绑定而绕过过滤。客户端新增来源格式须先验证，不默认放行。
+
 状态位于 `<vault>/.import_files/sunday-note-agent/<project-id>/state.json`，不参与 Git 或设备同步，不作为 Raw 或知识来源；批次和去重记录不可按普通缓存清理。项目绑定仍在 Vault 外。每项目仅一个未完成批次，运行中新增轮次合并；超时或发送结果不明不自动重发。确认旧请求不在排队或执行后才用 `retry --confirm-stopped`。未解决事项由 `status` 查看，明确处理后用 `resolve --issue-id <id>` 关闭。完成或无增量均由 Skill 登记，成功后清除临时原文；用量无法观测时记为未知。
 
 ## 回归验证

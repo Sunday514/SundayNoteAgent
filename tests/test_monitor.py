@@ -44,7 +44,8 @@ class MonitorTests(unittest.TestCase):
         self.tmp.cleanup()
 
     def event(self, turn='t1', session='dev', prompt='完成任务', event='Stop'):
-        p = self.root / (session + '.jsonl')
+        p = self.root / 'codex/sessions' / (session + '.jsonl')
+        p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(json.dumps({'type': 'session_meta', 'payload': {'id': session, 'source': 'cli'}}) + '\n')
         return {'session_id': session, 'turn_id': turn, 'cwd': str(self.repo), 'prompt': prompt,
                 'last_assistant_message': '测试通过（主 Agent 声明）',
@@ -114,6 +115,25 @@ class MonitorTests(unittest.TestCase):
             self.assertIsNone(m.collect(self.vault, {**self.event(), **extra}))
         m.configure(self.vault, 'p', False)
         self.assertIsNone(m.collect(self.vault, self.event()))
+
+    def test_only_persistent_main_sessions(self):
+        e = self.event()
+        self.assertIsNone(m.collect(self.vault, {**e, 'ephemeral': True}))
+        p = Path(e['transcript_path'])
+        base = {'id': 'dev', 'source': 'cli'}
+        for change in ({'source': None}, {'source': 'unknown'}, {'source': {'subagent': {}}},
+                       {'ephemeral': True}, {'thread_source': 'side_chat'},
+                       {'thread_source': 'side_conversation'}, {'thread_source': 'ephemeral'}):
+            p.write_text(json.dumps({'type': 'session_meta', 'payload': {**base, **change}}) + '\n')
+            self.assertIsNone(m.collect(self.vault, e), change)
+        p.write_text(json.dumps({'type': 'session_meta', 'payload': base}) + '\n')
+        outside = self.root / 'ephemeral.jsonl'
+        outside.write_text(p.read_text())
+        self.assertIsNone(m.collect(self.vault, {**e, 'transcript_path': str(outside)}))
+        self.assertFalse(self.state()['pending'])
+        p.write_text(json.dumps({'type': 'session_meta', 'payload': {
+            **base, 'source': 'vscode', 'thread_source': 'agent_created_thread'}}) + '\n')
+        self.assertEqual(m.collect(self.vault, e), 'p')
 
     def test_uncertain_not_resent(self):
         m.collect(self.vault, self.event())
