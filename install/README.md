@@ -117,7 +117,31 @@ python3 install/migrate_plugin.py rollback --vault-root /path/to/vault --source-
 
 基础安装器 `--deployment standalone` 仍可用于不使用插件的设备和兼容规则导出；不要在本机插件旁再导出同名知识库 Skills。
 
-## 验证
+## 项目证据回流（可选）
+
+安装会分发 Monitor Skill，但不自动安装 Hook 或启用项目。先在绑定维护会话核实 `gpt-6.1-sol / medium`、本项目 Raw 和 Vault 内回流状态目录的普通沙箱写权限，以及 App 原生队列在忙碌会话中延后执行。项目 source 变更不保证已有会话权限同步变化。能力验证未通过时不要启用。
+
+以下 `MONITOR` 指本次安装中 `skills/sunday-note-monitor/scripts/monitor.py` 的实际路径。它与 Project Skill 一同分发，不使用旧 Monitor 的 MCP、日志目录或执行器。
+
+```bash
+python3 "$MONITOR" install --vault-root /path/to/vault
+python3 "$MONITOR" enable --vault-root /path/to/vault --project-id example --codex /verified/app/codex
+python3 "$MONITOR" status --vault-root /path/to/vault --project-id example
+python3 "$MONITOR" disable --vault-root /path/to/vault --project-id example
+python3 "$MONITOR" uninstall --vault-root /path/to/vault
+```
+
+`install` 合并本工具的两个用户级 Hook 并备份原文件；更新分发路径后重新执行，替换原注册。按客户端流程审阅并信任，不绕过信任检查。停用插件前先停用项目并卸载 Hook；状态和历史保留，不恢复同步。
+
+停用停止新采集与投递，已领取批次仍可登记完成；未领取批次保留。卸载前等正在整理的批次完成。部署前人工核对旧 Monitor Hook／MCP，不自动删除其他版本配置。未加载的维护会话可能要打开后才执行排队消息，不承诺关闭状态下后台运行。
+
+投递使用明确验收过的 App Codex 路径，不使用 PATH 中的系统 CLI；来源 CLI 路径只记录为证据。App 升级或连接行为改变后须复验，失败时不启动替代会话。脚本不调用模型，维护会话是唯一整理 Agent；写入范围由 Skill 授权约束，不宣称硬沙箱隔离。
+
+状态位于 `<vault>/.import_files/sunday-note-agent/<project-id>/state.json`，不参与 Git 或设备同步，不作为 Raw 或知识来源；批次和去重记录不可按普通缓存清理。项目绑定仍在 Vault 外。每项目仅一个未完成批次，运行中新增轮次合并；超时或发送结果不明不自动重发。确认旧请求不在排队或执行后才用 `retry --confirm-stopped`。未解决事项由 `status` 查看，明确处理后用 `resolve --issue-id <id>` 关闭。完成或无增量均由 Skill 登记，成功后清除临时原文；用量无法观测时记为未知。
+
+## 回归验证
+
+每批的简短结果、修改文件与时间保留在状态的 `results` 中，不保留完整模型输出；`status` 显示最近结果。原文完成后清除，来源标识仅用于本机去重，不写入 Raw。
 
 `bash tests/run.sh` 使用脱敏临时目录覆盖现有功能、插件构建、迁移、重复更新、停用与回退。KDI 的 `prepare/all --plugin-root <实际插件缓存目录>` 将实际部署与源码 hash 对照，并冻结对应 Skills；不填时检查 vault 内部署。
 

@@ -117,7 +117,7 @@ fi
 case "$INSTALL_MODE" in personal|work) ;; *) echo "invalid saved install mode: $INSTALL_MODE" >&2; exit 2 ;; esac
 TEMPLATE_DIR=个人模板
 TEMPLATE_SOURCE="$SOURCE_ROOT/templates"
-CORE_SKILLS=(sunday-note-ingest sunday-note-lint sunday-note-query sunday-note-project)
+CORE_SKILLS=(sunday-note-ingest sunday-note-lint sunday-note-query sunday-note-project sunday-note-monitor)
 if [ "$INSTALL_MODE" = work ]; then
   TEMPLATE_DIR=工作模板
   TEMPLATE_SOURCE="$SOURCE_ROOT/templates/work"
@@ -220,7 +220,12 @@ copy_managed_dir() {
     rm -f "$dst"
   fi
   mkdir -p "$dst"
-  cp -R "$src/." "$dst/"
+  python3 - "$src" "$dst" <<'PY'
+import shutil
+import sys
+shutil.copytree(sys.argv[1], sys.argv[2], dirs_exist_ok=True,
+                ignore=shutil.ignore_patterns('__pycache__', '*.pyc', '*.pyo'))
+PY
 }
 
 prepare_managed_agents() {

@@ -34,6 +34,7 @@ def source_identity(value):
         raise ValueError(f"来源目录不存在: {path}")
     env = {k: v for k, v in os.environ.items() if not k.startswith('GIT_')}
     env['GIT_OPTIONAL_LOCKS'] = '0'
+    env['LC_ALL'] = 'C'
     result = subprocess.run(['git', '-C', str(path), 'rev-parse', '--path-format=absolute',
                              '--git-common-dir'], env=env, capture_output=True, text=True, timeout=5)
     if result.returncode == 0:

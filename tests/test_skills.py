@@ -9,6 +9,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 CORE_SKILLS = (
+    "sunday-note-monitor",
     "sunday-note-project",
     "sunday-note-ingest",
     "sunday-note-lint",

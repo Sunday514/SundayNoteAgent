@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+export PYTHONDONTWRITEBYTECODE=1
 
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP_ROOT="$(mktemp -d)"
@@ -33,7 +34,8 @@ assert_source_tree_exported() {
     relative_path="${source_file#"$source_dir/"}"
     test -f "$target_dir/$relative_path" || fail "missing exported file: $target_dir/$relative_path"
     assert_same_file "$source_file" "$target_dir/$relative_path"
-  done < <(find "$source_dir" -type f -print0)
+  done < <(find "$source_dir" -type f ! -path '*/__pycache__/*' ! -name '*.pyc' ! -name '*.pyo' -print0)
+  test -z "$(find "$target_dir" -name __pycache__ -o -name '*.pyc' -o -name '*.pyo')" || fail "bytecode exported"
 }
 
 make_command_path() {
