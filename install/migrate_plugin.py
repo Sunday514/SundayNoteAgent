@@ -205,9 +205,6 @@ def apply(plan, paper=False, remote_app_id=None):
         step(transaction, journal, "marketplace", publish_market, [market])
         binding = {"vault": str(vault), "source": str(source_target), "state_dir": str(state_dir),
                    "mode": plan["mode"], **options}
-        previous = read_json(config_dir / "config.json", {})
-        if previous.get("vault") == str(vault) and "work_wiki_roots" in previous:
-            binding["work_wiki_roots"] = previous["work_wiki_roots"]
         step(transaction, journal, "binding", lambda: atomic(config_dir / "config.json", binding), [config_dir / "config.json"])
         step(transaction, journal, "vault-tools", lambda: run("bash", source_target / "install/install.sh", "--vault-root", vault, "--deployment", "plugin",
             "--install-state", config_dir / "install-mode", "--mode", plan["mode"], "--routine-templates", "preserve"),

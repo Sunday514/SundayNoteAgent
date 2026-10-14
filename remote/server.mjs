@@ -12,7 +12,7 @@ const sandbox = new Sandbox(await loadConfig(process.env.SANDBOX_CONFIG));
 await sandbox.preflight();
 function createServer() {
   const server = new McpServer({name:'sundaynote-sandbox',version:'3.0.0'}, {
-    instructions:'Inspect list_workspaces before executing. Commands run in a rootless offline container, never on the VPS host. Use Shell/Python/Git for reading, searching, patching and testing. Writable mounts permit overwrites and deletion: confirm task scope, preserve user work, and use version control or copies. There is no paragraph filtering or implicit backup. An accepted task is not completed; inspect its output and exit code. No host administration, mount changes, networking or credentials are exposed.'
+    instructions:'Inspect list_workspaces before executing. Use only its container paths, not client-local or VPS host paths. Commands run in a rootless offline container, never on the VPS host. Use Shell/Python/Git for reading, searching, patching and testing. Writable mounts permit overwrites and deletion: confirm task scope, preserve user work, and use version control or copies. There is no paragraph filtering or implicit backup. An accepted task is not completed; poll task_output until terminal status and check running, state, exit_code, oom_killed and output before starting the next task. After reconnecting, inspect list_tasks before retrying an uncertain write. No host administration, mount changes, networking or credentials are exposed.'
   });
   function register(name,description,inputSchema,handler,readOnlyHint=true) {
     server.registerTool(name,{description,inputSchema,annotations:{readOnlyHint,destructiveHint:!readOnlyHint,openWorldHint:false}},async args => {

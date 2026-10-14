@@ -16,7 +16,7 @@ CORE_SKILLS = (
     "sunday-note-query",
 )
 LINT_DESCRIPTION = "仅在用户显式调用 `$sunday-note-lint` 时，对获授权的 Wiki 执行检查与维护。"
-PAPER_DESCRIPTION = "用户要求精读或总结本地 PDF 论文时使用。"
+PAPER_DESCRIPTION = "用户要求精读或总结当前环境可访问的 PDF 论文时使用。"
 
 
 def parse_skill(path: Path) -> tuple[dict[str, str], str]:

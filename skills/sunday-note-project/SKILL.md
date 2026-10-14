@@ -1,9 +1,11 @@
 ---
 name: sunday-note-project
-description: 用户要求创建或接入 Vault 项目、建立项目维护文档、绑定维护会话，或镜像项目 Agent 规则时使用。
+description: 用户在本地要求创建或接入 Vault 项目、建立项目维护文档、绑定维护会话，或镜像项目 Agent 规则时使用。
 ---
 
 # Project
+
+仅在本地执行项目接入、绑定与规则镜像；远程环境不启动本工作流。
 
 镜像仓库规则时使用 [规则镜像](references/rule-mirror.md)，不重新登记项目或修改回流开关。
 

@@ -27,7 +27,7 @@ python3 install/migrate_plugin.py apply --vault-root /path/to/vault --source-tar
 
 插件不包含生命周期 Hooks，不要求 `SessionStart`。在 vault 项目中读取其根规则；跨项目使用时显式指定 vault，或按需读取本机绑定中的 `vault` 字段并确认目标。不要默认将当前代码仓库当作知识库。
 
-## 项目接入
+## 项目接入（仅本地）
 
 在选定的项目会话调用 `sunday-note-project`，说明 Vault、项目归属和关联仓库。Skill 建立或核对四文档；普通 Ingest 不要求注册。只有明确指定会话时才绑定维护入口，不依赖当前会话环境自动授权。
 
@@ -52,7 +52,7 @@ python3 skills/sunday-note-project/scripts/project_binding.py unbind --vault-roo
 | --- | --- |
 | 源码仓库 | Skills、脚本、安装源文件，唯一开发真值 |
 | vault | 笔记、模板、根 AGENTS、`SundayNoteTools/quickadd/` |
-| `$XDG_CONFIG_HOME/sunday-note-agent/` | vault/模式绑定、Wiki 读取授权与独立的设备同步授权 |
+| `$XDG_CONFIG_HOME/sunday-note-agent/` | vault/模式与项目绑定、独立的设备同步授权 |
 | `$XDG_STATE_HOME/sunday-note-agent/` | 插件迁移检查点与备份 |
 | `$XDG_DATA_HOME/sunday-note-agent/marketplace/` | 生成的插件发布源，由安装器刷新 |
 
@@ -62,7 +62,7 @@ QuickAdd 按现有 ID 更新本项目入口，保留用户 choices；个人模�
 
 根规则由 scaffold 与模式段生成，保留个人模式末尾唯一的“个性化响应”段。首页、Daily 模板和个人上下文仅在缺失时创建；迁移不覆盖已有 Routine 模板。需要刷新托管 Weekly/Monthly 时显式运行基础安装器，使用相同外置 `--install-state`。
 
-工作 Wiki 读取范围在本机 `config.json` 的 `work_wiki_roots` 数组中明确配置，例如 `["知识库/基础知识/Agent工程"]`。值为知识库下的相对目录或具体 Markdown 文件，不批准整个知识库；未配置时 Query／Lint 不遍历 Wiki，准确路径、全局索引及符号链接也不能绕过。未绑定且无安装模式记录的 Vault 不允许用 `--mode personal` 扩大范围。个人模式支持工作与个人材料共存，工作请求仍使用 work 范围。重复安装保留同一 Vault 的批准列表，不将其复制给其他 Vault。
+Query、Ingest、Lint、Paper 通过环境工具在任务授权范围内工作，不依赖本机搜索脚本或授权配置。范围不明先确认；文件可见、链接与同步许可不等于读取授权。安装重建配置时不再保留已退出使用的字段。
 
 `.stignore` 由独立设备批准列表生成，读取许可不自动授予同步。配置位于 `$XDG_CONFIG_HOME/sunday-note-agent/sync-allowlist.json`，JSON 以 Vault 绝对路径为键、获批相对集合路径数组为值。项目、资料、Wiki 均批准到具体集合；更新不扩大范围。安全排除优先，最终 `*` 默认拒绝，已有用户规则保留在其后但不能绕过默认拒绝。
 

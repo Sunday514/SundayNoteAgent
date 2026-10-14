@@ -301,35 +301,11 @@ EOF
 printf '%s\n' "# 集成来源" > "$vault/工作资料/集成来源.md"
 printf '%s\n' "唯一集成词只应作为直接来源读取。" > "$vault/个人记录/每日/2026-07-13.md"
 
-query_output="$(python "$vault/.agents/skills/sunday-note-query/scripts/query_search.py" \
-  "唯一集成词" --vault-root "$vault")"
-assert_file_contains <(printf '%s' "$query_output") "知识库/集成测试.md"
-if grep -Fq "个人记录/每日" <<< "$query_output"; then
-  fail "installed Query searched Routine directly"
-fi
-
-test ! -e "$vault/.agents/skills/sunday-note-query/scripts/update_query_header.py" || fail "query updater installed"
-assert_file_contains "$vault/知识库/集成测试.md" "query_count: 0"
-assert_file_contains "$vault/知识库/集成测试.md" "唯一集成词。"
-
-test ! -e "$vault/.agents/skills/sunday-note-lint/scripts/lint_headers.py" || fail "obsolete header checker installed"
-
-audit_output="$(python "$vault/.agents/skills/sunday-note-lint/scripts/audit_reachability.py" \
-  --root "$vault" \
-  --wiki-entry "知识库/索引.md" \
-  --wiki-scope "知识库/索引.md" \
-  --wiki-scope "知识库/集成测试.md" \
-  --raw-scope "工作资料/集成来源.md" \
-  --routine-scope "个人记录/每日/2026-07-13.md" \
-  --format json)"
-assert_file_contains <(printf '%s' "$audit_output") '"wiki_unreachable": []'
-assert_file_contains <(printf '%s' "$audit_output") '"raw_unlinked": []'
-
 printf '%s\n' "local template" > "$vault/个人模板/每日记录.md"
 printf '%s\n' "stale managed rule" > "$vault/AGENTS.md"
 printf '%s\n' "personal context sentinel" >> "$vault/个人记录/个人上下文.md"
-printf '%s\n' "stale managed script" > "$vault/.agents/skills/sunday-note-query/scripts/query_search.py"
 printf '%s\n' "extra skill file" > "$vault/.agents/skills/sunday-note-query/local.md"
+mkdir -p "$vault/.agents/skills/sunday-note-query/scripts" "$vault/.agents/skills/sunday-note-lint/scripts"
 printf '%s\n' "old query updater" > "$vault/.agents/skills/sunday-note-query/scripts/update_query_header.py"
 printf '%s\n' "old header checker" > "$vault/.agents/skills/sunday-note-lint/scripts/lint_headers.py"
 printf '%s\n' "local query helper" > "$vault/.agents/skills/sunday-note-query/scripts/local.py"

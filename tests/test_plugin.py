@@ -119,12 +119,6 @@ class PluginTests(unittest.TestCase):
             self.assertEqual(note.read_text(), "human knowledge")
             migration.apply(migration.inspect(self.vault, ROOT))
             self.assertEqual(projects.read_bytes(), project_bytes)
-            config = self.root / "config/sunday-note-agent/config.json"
-            binding = read_json(config, {})
-            binding["work_wiki_roots"] = ["知识库/已批准"]
-            config.write_text(json.dumps(binding))
-            migration.apply(migration.inspect(self.vault, ROOT))
-            self.assertEqual(read_json(config, {})["work_wiki_roots"], ["知识库/已批准"])
             self.assertEqual((self.root / "codex/hooks.json").read_bytes(), old_hooks)
         self.assertTrue(any(c[:3] == ["codex", "plugin", "add"] for c in self.calls))
 

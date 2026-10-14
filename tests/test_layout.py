@@ -123,58 +123,6 @@ class LayoutTests(unittest.TestCase):
             ml.apply(self.vault, state, data)
         self.assertFalse((outside / "a.md").exists())
 
-    def test_query_permissions_and_projects(self):
-        self.put("知识库/A/a.md", "needle")
-        self.put("知识库/私人/b.md", "needle")
-        self.put("知识库/索引.md", "needle")
-        self.put("工作项目/A/知识/old.md", "needle")
-        (self.vault / "知识库/A/leak.md").symlink_to(self.vault / "知识库/私人/b.md")
-        query = ROOT / "skills/sunday-note-query/scripts/query_search.py"
-        config = self.home / "config/sunday-note-agent/config.json"
-        config.parent.mkdir(parents=True)
-        env = {**os.environ, "XDG_CONFIG_HOME": str(self.home / "config")}
-        config.write_text(json.dumps({"vault": str(self.vault), "mode": "personal", "work_wiki_roots": ["知识库/A"]}))
-        def run(mode):
-            return subprocess.check_output([sys.executable, query, "--vault-root", self.vault, "--mode", mode, "needle"], text=True, env=env)
-        work, personal = run("work"), run("personal")
-        self.assertIn("知识库/A/a.md", work)
-        self.assertNotIn("私人", work)
-        self.assertNotIn("索引.md", work)
-        self.assertNotIn("old.md", personal)
-        self.assertIn("知识库/私人/b.md", personal)
-        self.assertNotIn("leak", work)
-        self.put("知识库/新主题/new.md", "needle")
-        self.assertNotIn("new.md", run("work"))
-        self.put("知识库/A/new.md", "needle")
-        self.assertIn("new.md", run("work"))
-        # Lint cannot use an index, source, or symlink outside the approved scope.
-        lint = ROOT / "skills/sunday-note-lint/scripts/audit_reachability.py"
-        for scope in ("知识库", "知识库/索引.md", "知识库/A/leak.md", "知识库/A/../私人"):
-            r = subprocess.run([sys.executable, lint, "--root", self.vault, "--mode", "work", "--wiki-entry", "知识库/A/a.md", "--wiki-scope", scope], env=env, capture_output=True)
-            self.assertNotEqual(r.returncode, 0, scope)
-        audit = ROOT / "skills/sunday-note-lint/scripts/audit_reachability.py"
-        r = subprocess.run([sys.executable, audit, "--root", self.vault, "--mode", "work",
-                            "--wiki-entry", "知识库/A/a.md", "--wiki-scope", "知识库/A", "--raw-scope", "个人资料"], env=env, capture_output=True)
-        self.assertNotEqual(r.returncode, 0)
-        (self.vault / "知识库/链接").symlink_to(self.vault / "知识库/私人", target_is_directory=True)
-        config.write_text(json.dumps({"vault": str(self.vault), "mode": "personal", "work_wiki_roots": ["知识库/链接"]}))
-        with self.assertRaises(subprocess.CalledProcessError):
-            run("work")
-        config.write_text(json.dumps({"vault": str(self.vault), "mode": "work"}))
-        for mode in ("work", "personal"):
-            with self.assertRaises(subprocess.CalledProcessError):
-                run(mode)
-        config.unlink()
-        with self.assertRaises(subprocess.CalledProcessError):
-            run("personal")
-        config.write_text(json.dumps({"vault": str(self.vault), "mode": "work", "work_wiki_roots": ["知识库/A/a.md"]}))
-        self.assertIn("知识库/A/a.md", run("work"))
-        self.assertNotIn("new.md", run("work"))
-        config.unlink()
-        self.put(".sunday-note-agent/install-mode", "personal\n")
-        default = subprocess.check_output([sys.executable, query, "--vault-root", self.vault, "needle"], text=True, env=env)
-        self.assertIn("知识库/私人/b.md", default)
-
     def test_sync_default_deny_idempotent(self):
         sync.render(self.vault, [])
         self.assertNotIn("!/工作", (self.vault / ".stignore").read_text())
