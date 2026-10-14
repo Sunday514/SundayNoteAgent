@@ -92,6 +92,7 @@ def run(*argv):
 
 def targets(vault, codex_home, config_dir, data_dir):
     return [config_dir / "config.json", config_dir / "install-mode", data_dir / "marketplace",
+            data_dir / "monitor-runtime",
             codex_home / "config.toml",
             vault / "AGENTS.md", vault / ".stignore", vault / "SundayNoteTools",
             vault / ".obsidian/daily-notes.json",
@@ -203,6 +204,9 @@ def apply(plan, paper=False, remote_app_id=None):
             remove_owned(market)
             copy(staging, market)
         step(transaction, journal, "marketplace", publish_market, [market])
+        step(transaction, journal, "monitor-runtime", lambda: run(sys.executable,
+             source_target / "skills/sunday-note-monitor/scripts/monitor.py", "deploy", "--vault-root", vault),
+             [data_dir / "monitor-runtime"])
         binding = {"vault": str(vault), "source": str(source_target), "state_dir": str(state_dir),
                    "mode": plan["mode"], **options}
         step(transaction, journal, "binding", lambda: atomic(config_dir / "config.json", binding), [config_dir / "config.json"])

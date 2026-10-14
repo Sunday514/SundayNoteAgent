@@ -9,6 +9,7 @@ import re
 import shlex
 import subprocess
 import sys
+import tempfile
 import time
 import uuid
 
@@ -289,9 +290,35 @@ def configure(vault, project, enabled, runtime=None):
         binding.save(path, data)
 
 
+def runtime_root():
+    return binding.safe_path(Path(os.environ.get('XDG_DATA_HOME', Path.home() / '.local/share')) /
+                             'sunday-note-agent/monitor-runtime')
+
+
+def deploy_runtime():
+    root = runtime_root()
+    for source in (Path(binding.__file__), HERE):
+        target = binding.safe_path(root / source.relative_to(HERE.parents[2]))
+        target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        content = source.read_bytes()
+        if target.exists() and target.read_bytes() == content:
+            continue
+        fd, name = tempfile.mkstemp(dir=target.parent)
+        try:
+            with os.fdopen(fd, 'wb') as out:
+                out.write(content)
+            os.replace(name, target)
+        finally:
+            if os.path.exists(name):
+                os.unlink(name)
+
+
 def hooks(vault, install):
     path = binding.safe_path(Path(os.environ.get('CODEX_HOME', Path.home() / '.codex')) / 'hooks.json')
-    command = f'{shlex.quote(sys.executable)} {shlex.quote(str(HERE))} hook --vault-root {shlex.quote(str(vault))}'
+    if install:
+        deploy_runtime()
+    entry = runtime_root() / 'sunday-note-monitor/scripts/monitor.py'
+    command = f'{shlex.quote(sys.executable)} {shlex.quote(str(entry))} hook --vault-root {shlex.quote(str(vault))}'
     with binding.locked(path):
         data = json.loads(path.read_text()) if path.exists() else {}
         owned = state_root(vault) / 'hook-command.json'
@@ -305,10 +332,11 @@ def hooks(vault, install):
             groups[:] = [g for g in groups if g.get('hooks')]
             if install:
                 groups.append({'hooks': [{'type': 'command', 'command': command, 'timeout': 5}]})
-        if path.exists():
+        if path.exists() and json.loads(path.read_text()) != data:
             backup = state_root(vault) / ('hooks-backup-' + str(time.time_ns()) + '.json')
             binding.save(backup, json.loads(path.read_text()))
-        binding.save(path, data)
+        if not path.exists() or json.loads(path.read_text()) != data:
+            binding.save(path, data)
         with binding.locked(owned):
             records = json.loads(owned.read_text()) if owned.exists() else {}
             if install:
@@ -320,7 +348,7 @@ def hooks(vault, install):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('command', choices=['hook', 'install', 'uninstall', 'enable', 'disable',
+    parser.add_argument('command', choices=['hook', 'deploy', 'install', 'uninstall', 'enable', 'disable',
                                           'dispatch', 'status', 'claim', 'complete', 'retry', 'resolve'])
     parser.add_argument('--vault-root', required=True)
     parser.add_argument('--project-id')
@@ -343,6 +371,8 @@ def main():
                                   '--project-id', project], stdin=subprocess.DEVNULL,
                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
             print('{"continue":true}')
+        elif args.command == 'deploy':
+            deploy_runtime()
         elif args.command in ('install', 'uninstall'):
             hooks(vault, args.command == 'install')
         else:

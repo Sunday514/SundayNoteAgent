@@ -123,7 +123,7 @@ python3 install/migrate_plugin.py rollback --vault-root /path/to/vault --source-
 
 安装会分发 Monitor Skill，但不自动安装 Hook 或启用项目。先在绑定维护会话核实 `gpt-6.1-sol / medium`、本项目 Raw 和 Vault 内回流状态目录的普通沙箱写权限，以及 App 原生队列在忙碌会话中延后执行。项目 source 变更不保证已有会话权限同步变化。能力验证未通过时不要启用。
 
-以下 `MONITOR` 指本次安装中 `skills/sunday-note-monitor/scripts/monitor.py` 的实际路径。它与 Project Skill 一同分发，不使用旧 Monitor 的 MCP、日志目录或执行器。
+插件安装器同时更新稳定本机运行副本。以下 `MONITOR` 为 `${XDG_DATA_HOME:-$HOME/.local/share}/sunday-note-agent/monitor-runtime/sunday-note-monitor/scripts/monitor.py`；standalone 首次可从已安装 Skill 脚本执行 `install` 创建该副本。
 
 ```bash
 python3 "$MONITOR" install --vault-root /path/to/vault
@@ -133,7 +133,9 @@ python3 "$MONITOR" disable --vault-root /path/to/vault --project-id example
 python3 "$MONITOR" uninstall --vault-root /path/to/vault
 ```
 
-`install` 合并本工具的两个用户级 Hook 并备份原文件；更新分发路径后重新执行，替换原注册。按客户端流程审阅并信任，不绕过信任检查。停用插件前先停用项目并卸载 Hook；状态和历史保留，不恢复同步。
+`install` 合并本工具的两个用户级 Hook，仅在配置变化时写入并备份。Hook 指向稳定运行副本，不引用插件版本缓存。首次从缓存入口切换时执行一次 `install`，按客户端流程审阅信任并重载；随后使用上方一条插件 `apply` 命令构建、部署 Skill 和更新运行副本，不必重新注册 Hook。standalone 更新后从新 Skill 执行 `deploy --vault-root /path/to/vault`。事件或命令变化时才重新配置 Hook；客户端仍可能要求重新审阅，不能绕过。停用插件前先停用项目并卸载 Hook；状态和历史保留。
+
+文件部署完成不表示当前会话已经加载新版 Skill；按客户端实际发现结果决定是否重载。已缓存旧版本 Hook 的会话仍须重载一次，稳定入口不会修复客户端已经记住的旧命令。
 
 停用停止新采集与投递，已领取批次仍可登记完成；未领取批次保留。卸载前等正在整理的批次完成。部署前人工核对旧 Monitor Hook／MCP，不自动删除其他版本配置。未加载的维护会话可能要打开后才执行排队消息，不承诺关闭状态下后台运行。
 

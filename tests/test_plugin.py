@@ -103,6 +103,9 @@ class PluginTests(unittest.TestCase):
         note.write_text("human knowledge")
         with patch.object(migration, "run", self.fake_run):
             migration.apply(plan)
+            runtime = self.root / 'data/sunday-note-agent/monitor-runtime'
+            self.assertEqual((runtime / 'sunday-note-monitor/scripts/monitor.py').read_bytes(),
+                             (ROOT / 'skills/sunday-note-monitor/scripts/monitor.py').read_bytes())
             projects = self.root / "config/sunday-note-agent/project-bindings.json"
             projects.write_text(json.dumps({str(self.vault): {"fixture": {"maintenance": None}}}))
             project_bytes = projects.read_bytes()
@@ -112,6 +115,7 @@ class PluginTests(unittest.TestCase):
             self.assertEqual((self.root / "codex/hooks.json").read_bytes(), old_hooks)
             self.assertEqual({p: migration.fingerprint(p) for p in local_paths}, local_hashes)
             migration.rollback(Path(plan["state_dir"]))
+            self.assertFalse(runtime.exists())
             self.assertEqual(projects.read_bytes(), project_bytes)
             self.assertEqual((self.root / "codex/hooks.json").read_bytes(), old_hooks)
             self.assertEqual({p: migration.fingerprint(p) for p in local_paths}, local_hashes)

@@ -22,6 +22,7 @@ class MonitorTests(unittest.TestCase):
         self.root = Path(self.tmp.name)
         self.env = patch.dict(os.environ, {
             'XDG_CONFIG_HOME': str(self.root / 'config'), 'XDG_STATE_HOME': str(self.root / 'state'),
+            'XDG_DATA_HOME': str(self.root / 'data'),
             'CODEX_HOME': str(self.root / 'codex'), 'CODEX_THREAD_ID': 'maint'})
         self.env.start()
         self.vault = self.root / 'vault'
@@ -155,10 +156,34 @@ class MonitorTests(unittest.TestCase):
         original = {'hooks': {'Stop': [{'hooks': [{'type': 'command', 'command': 'other'}]}]}}
         m.binding.save(p, original)
         m.hooks(self.vault, True)
+        installed = p.read_bytes()
+        modified = p.stat().st_mtime_ns
         m.hooks(self.vault, True)
+        self.assertEqual(p.read_bytes(), installed)
+        self.assertEqual(p.stat().st_mtime_ns, modified)
+        self.assertIn(str(m.runtime_root()), installed.decode())
         self.assertEqual(len(json.loads(p.read_text())['hooks']['Stop']), 2)
         m.hooks(self.vault, False)
         self.assertEqual(json.loads(p.read_text())['hooks']['Stop'], original['hooks']['Stop'])
+
+    def test_runtime_survives_source_cache_removal(self):
+        import shutil
+        cache = self.root / 'versioned-cache/skills'
+        for source in (m.HERE, Path(m.binding.__file__)):
+            target = cache / source.relative_to(m.HERE.parents[2])
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, target)
+        source = cache / 'sunday-note-monitor/scripts/monitor.py'
+        subprocess.run([m.sys.executable, str(source), 'install', '--vault-root', str(self.vault)], check=True)
+        hook_file = self.root / 'codex/hooks.json'
+        before = hook_file.read_bytes()
+        shutil.rmtree(cache.parent)
+        entry = m.runtime_root() / 'sunday-note-monitor/scripts/monitor.py'
+        result = subprocess.run([m.sys.executable, str(entry), 'hook', '--vault-root', str(self.vault)],
+                                input='{}', text=True, capture_output=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        m.deploy_runtime()
+        self.assertEqual(hook_file.read_bytes(), before)
 
     def test_redaction_and_oversize(self):
         e = self.event(prompt='api_key=secret')
