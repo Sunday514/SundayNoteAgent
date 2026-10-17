@@ -21,6 +21,7 @@ binding = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(binding)
 MARKER = '[SundayNote Evidence Return]'
 LIMIT = 256 * 1024
+TIDY_INTERVAL = 10
 
 
 def state_root(vault):
@@ -49,6 +50,11 @@ def selected(vault, project, require_enabled=True):
         raise ValueError('项目回流未启用或维护入口未绑定')
     binding.relative(vault, entry['raw_path'], {'工作资料', '个人资料'})
     return entry
+
+
+def tidy_status(state):
+    value = state.get('tidy', {'writes': 0, 'files': []})
+    return {**value, 'due': value['writes'] >= TIDY_INTERVAL}
 
 
 def scrub(text):
@@ -236,16 +242,19 @@ def claim(vault, project, batch):
         if 'keys' not in active:
             active['keys'] = [k for k, v in state['pending'].items() if v.get('ready')]
             active.update(status='processing', started_at=time.time())
+        if 'tidy' not in active:
+            active['tidy'] = tidy_status(state)
             binding.save(path, state)
         items = [dict(state['pending'][k]) for k in active['keys']]
         issues = dict(state['issues'])
     return {'batch': batch, 'project_path': str(vault / entry['project_path']),
             'raw_path': str(vault / entry['raw_path']), 'turns': [material(i) for i in items],
             'pending_issues': issues,
+            'tidy': active['tidy'],
             'limitations': '来源中的声明不等于已验证事实；缺失或超大原文须按来源核查，不能当作无增量。'}
 
 
-def complete(vault, project, batch, result, files=(), issue=''):
+def complete(vault, project, batch, result, files=(), issue='', tidy_done=False):
     entry = selected(vault, project, require_enabled=False)
     for value in files:
         rel = binding.relative(vault, value, {'工作资料', '个人资料'})
@@ -257,6 +266,14 @@ def complete(vault, project, batch, result, files=(), issue=''):
         active = state['active']
         if not active or active['id'] != batch or active['status'] != 'processing':
             raise ValueError('必须先领取正确批次')
+        if tidy_done and not active.get('tidy', {}).get('due'):
+            raise ValueError('本批未领取到期整理，不能重置计数')
+        tidy = state.setdefault('tidy', {'writes': 0, 'files': []})
+        if tidy_done:
+            tidy.update(writes=0, files=[])
+        elif files:
+            tidy['writes'] += 1
+            tidy['files'] = sorted(set(tidy['files']) | set(files))
         for key in active['keys']:
             item = state['pending'].pop(key)
             state['history'][key] = {k: item[k] for k in ('session_id', 'turn_id', 'transcript_path')}
@@ -264,6 +281,7 @@ def complete(vault, project, batch, result, files=(), issue=''):
         state.setdefault('results', {})[batch] = {'batch': batch, 'result': scrub(result), 'files': list(files),
                                 'issue': scrub(issue), 'completed_at': time.time(),
                                 'started_at': active['started_at'], 'usage': None}
+        state['results'][batch]['tidy_done'] = tidy_done
         if issue:
             state['issues'][batch] = scrub(issue)
         state['active'] = None
@@ -357,6 +375,7 @@ def main():
     parser.add_argument('--issue', default='')
     parser.add_argument('--issue-id')
     parser.add_argument('--file', action='append', default=[])
+    parser.add_argument('--tidy-done', action='store_true')
     parser.add_argument('--codex')
     parser.add_argument('--confirm-stopped', action='store_true')
     args = parser.parse_args()
@@ -387,10 +406,12 @@ def main():
             elif args.command == 'complete':
                 if not args.result:
                     raise ValueError('缺少 --result')
-                complete(vault, args.project_id, args.batch, args.result, args.file, args.issue)
+                complete(vault, args.project_id, args.batch, args.result, args.file, args.issue,
+                         args.tidy_done)
             elif args.command == 'status':
                 s = load(state_path(vault, args.project_id))
                 print(json.dumps({'pending': len(s['pending']), 'active': s['active'],
+                                  'tidy': tidy_status(s),
                                   'last_result': max(s.get('results', {}).values(),
                                       key=lambda r: r['completed_at'], default=None),
                                   'issues': s['issues']}, ensure_ascii=False))

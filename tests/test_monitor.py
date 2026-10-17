@@ -101,6 +101,72 @@ class MonitorTests(unittest.TestCase):
         self.assertEqual(list(self.state()['pending']), ['dev/t3'])
         self.assertEqual(len(self.dispatch()), 1)
 
+    def raw_files(self):
+        folder = self.vault / '工作资料/P'
+        folder.mkdir(parents=True, exist_ok=True)
+        for name in ('案例.md', '反例.md'):
+            (folder / name).write_text('已有事实与限制\n')
+        return ['工作资料/P/案例.md', '工作资料/P/反例.md']
+
+    def next_claim(self, turn, session='dev'):
+        m.collect(self.vault, self.event(turn, session))
+        self.dispatch()
+        batch = self.state()['active']['id']
+        return batch, m.claim(self.vault, 'p', batch)
+
+    def test_tidy_counts_project_writes_not_turns_or_files(self):
+        files = self.raw_files()
+        batch, report = self.next_claim('empty')
+        m.complete(self.vault, 'p', batch, '无增量')
+        self.assertEqual(m.tidy_status(self.state())['writes'], 0)
+        for i in range(10):
+            batch, report = self.next_claim(str(i), 'dev' if i % 2 else 'dev2')
+            self.assertFalse(report['tidy']['due'])
+            m.complete(self.vault, 'p', batch, '合并事实', files)
+        self.assertEqual(m.tidy_status(self.state()), {'writes': 10, 'files': sorted(files), 'due': True})
+        with self.assertRaises(ValueError):
+            m.complete(self.vault, 'p', batch, '重复', files)
+        self.assertEqual(m.tidy_status(self.state())['writes'], 10)
+        batch, report = self.next_claim('tidy')
+        self.assertTrue(report['tidy']['due'])
+        m.collect(self.vault, self.event('later'))
+        self.assertEqual(m.claim(self.vault, 'p', batch)['tidy'], report['tidy'])
+        m.complete(self.vault, 'p', batch, '已合并同条件对照', files, tidy_done=True)
+        self.assertEqual(m.tidy_status(self.state()), {'writes': 0, 'files': [], 'due': False})
+        self.assertTrue(self.state()['results'][batch]['tidy_done'])
+        self.assertIn('dev/later', self.state()['pending'])
+        self.assertIsNone(self.state()['active'])
+
+    def test_tidy_incomplete_and_no_change_completion(self):
+        files = self.raw_files()
+        path = m.state_path(self.vault, 'p')
+        state = self.state()
+        state['tidy'] = {'writes': 10, 'files': files[:1]}
+        m.binding.save(path, state)
+        batch, _ = self.next_claim('partial')
+        m.complete(self.vault, 'p', batch, '回流完成，整理待续', files[1:], issue='人工内容冲突')
+        self.assertEqual(m.tidy_status(self.state())['writes'], 11)
+        self.assertEqual(set(self.state()['tidy']['files']), set(files))
+        batch, report = self.next_claim('resume')
+        self.assertTrue(report['tidy']['due'])
+        m.complete(self.vault, 'p', batch, '已核对，无需改动', tidy_done=True)
+        self.assertFalse(m.tidy_status(self.state())['due'])
+        self.assertEqual(self.state()['tidy']['files'], [])
+
+    def test_tidy_old_history_starts_zero_and_is_project_local(self):
+        path = m.state_path(self.vault, 'p')
+        state = self.state()
+        state['results'] = {str(i): {'files': ['工作资料/P/案例.md']} for i in range(20)}
+        m.binding.save(path, state)
+        batch, report = self.next_claim('first')
+        self.assertEqual(report['tidy'], {'writes': 0, 'files': [], 'due': False})
+        with self.assertRaises(ValueError):
+            m.complete(self.vault, 'p', batch, '未到期', tidy_done=True)
+        m.complete(self.vault, 'p', batch, '写入', self.raw_files())
+        self.assertEqual(m.tidy_status(self.state())['writes'], 1)
+        self.assertEqual(m.tidy_status(m.load(m.state_path(self.vault, 'other'))),
+                         {'writes': 0, 'files': [], 'due': False})
+
     def test_auto_turn_and_user_decision(self):
         m.collect(self.vault, self.event(session='maint', prompt=m.MARKER, event='UserPromptSubmit'))
         m.collect(self.vault, self.event(session='maint', prompt=''))
