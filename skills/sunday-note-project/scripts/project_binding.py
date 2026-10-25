@@ -44,6 +44,16 @@ def source_identity(value):
     return {'kind': 'directory', 'path': str(path), 'identity': str(path)}
 
 
+def wiki_page(vault, value):
+    if any(c in value for c in '*?[]'):
+        raise ValueError('Wiki 授权不接受通配符')
+    rel = relative(vault, value, {'知识库'})
+    path = vault / rel
+    if path.suffix.lower() != '.md' or not path.is_file():
+        raise ValueError('Wiki 授权只接受已存在的 Markdown 页面')
+    return rel
+
+
 def config_path():
     return safe_path(Path(os.environ.get('XDG_CONFIG_HOME', Path.home() / '.config')) /
                      'sunday-note-agent/project-bindings.json')
@@ -89,6 +99,19 @@ def overlaps(left, right):
     return a.is_relative_to(b) or b.is_relative_to(a)
 
 
+def prepare_runtime(vault, project, runtime):
+    runtime = Path(runtime)
+    if not runtime.is_absolute() or not safe_path(runtime).is_file() or not os.access(runtime, os.X_OK):
+        raise ValueError('需要已核实的 App Codex 可执行文件绝对路径')
+    target = safe_path(vault / '.import_files/sunday-note-agent' / project / 'state.json')
+    with locked(target):
+        state = json.loads(target.read_text()) if target.exists() else {
+            'pending': {}, 'history': {}, 'active': None, 'issues': {}, 'results': {}}
+        state['runtime'] = {'codex': str(runtime), 'codex_home': str(safe_path(
+            Path(os.environ.get('CODEX_HOME', Path.home() / '.codex'))))}
+        save(target, state)
+
+
 def run(args):
     vault = safe_path(args.vault_root)
     if not vault.is_dir():
@@ -122,13 +145,27 @@ def run(args):
                         raise ValueError('项目目录已绑定其他标识')
                     if any(overlaps(a, b) for a in sources for b in entry['sources']):
                         raise ValueError('来源已绑定其他项目或 Vault')
+            session = getattr(args, 'session_id', None)
+            runtime = getattr(args, 'codex', None)
+            if bool(session) != bool(runtime):
+                raise ValueError('完整接入需同时提供维护会话和 App Codex 路径')
+            if session and not re.fullmatch(r'[A-Za-z0-9_-]{1,128}', session):
+                raise ValueError('无效会话 ID')
             value = {**(old or {}), 'project_path': project, 'raw_path': raw, 'sources': sources,
-                     'maintenance': (old or {}).get('maintenance'), 'raw_auto_enabled': False}
+                     'maintenance': (old or {}).get('maintenance'),
+                     'raw_auto_enabled': (old or {}).get('raw_auto_enabled', False)}
+            if session:
+                prepare_runtime(vault, args.project_id, runtime)
+                value['maintenance'] = {'client': 'codex', 'session_id': session}
+                # 已有开关代表用户选择，重登记不能擅自恢复暂停。
+                value['raw_auto_enabled'] = old.get('raw_auto_enabled', False) if old else True
         else:
             if old is None:
                 raise ValueError('项目尚未登记')
             value = dict(old)
-            if args.command == 'bind':
+            if args.command == 'wiki-targets':
+                value['wiki_targets'] = sorted({wiki_page(vault, p) for p in (args.page or [])})
+            elif args.command == 'bind':
                 if not re.fullmatch(r'[A-Za-z0-9_-]{1,128}', args.session_id):
                     raise ValueError('无效会话 ID')
                 if not (vault / relative(vault, old['project_path'], {'工作项目', '个人项目', 'SundayNoteAgent项目'})).is_dir():
@@ -144,7 +181,7 @@ def run(args):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest='command', required=True)
-    for command in ('list', 'register', 'bind', 'unbind'):
+    for command in ('list', 'register', 'bind', 'unbind', 'wiki-targets'):
         p = sub.add_parser(command)
         p.add_argument('--vault-root', required=True)
         if command != 'list':
@@ -153,9 +190,15 @@ def main():
             p.add_argument('--project-path', required=True)
             p.add_argument('--raw-path', required=True)
             p.add_argument('--source', action='append', default=[])
+            p.add_argument('--session-id')
+            p.add_argument('--codex', help='已核实的 App Codex 绝对路径')
         if command == 'bind':
             p.add_argument('--client', choices=['codex'], required=True)
             p.add_argument('--session-id', required=True)
+        if command == 'wiki-targets':
+            group = p.add_mutually_exclusive_group(required=True)
+            group.add_argument('--page', action='append')
+            group.add_argument('--clear', action='store_true')
     try:
         print(json.dumps(run(parser.parse_args()), ensure_ascii=False, indent=2))
     except (ValueError, OSError, subprocess.SubprocessError) as exc:

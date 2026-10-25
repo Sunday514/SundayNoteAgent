@@ -112,7 +112,10 @@ class PluginTests(unittest.TestCase):
             self.assertFalse((self.vault / ".agents/skills/sunday-note-query").exists())
             self.assertTrue((self.vault / "SundayNoteTools/quickadd/create_daily.js").is_file())
             self.assertEqual(note.read_text(), "human knowledge")
-            self.assertEqual((self.root / "codex/hooks.json").read_bytes(), old_hooks)
+            installed_hooks = read_json(self.root / "codex/hooks.json")
+            self.assertEqual(len(installed_hooks['hooks']['UserPromptSubmit']), 1)
+            self.assertEqual(len(installed_hooks['hooks']['Stop']), 2)
+            self.assertEqual(installed_hooks['hooks']['Stop'][0]['hooks'][0]['command'], 'echo custom')
             self.assertEqual({p: migration.fingerprint(p) for p in local_paths}, local_hashes)
             migration.rollback(Path(plan["state_dir"]))
             self.assertFalse(runtime.exists())
@@ -123,8 +126,54 @@ class PluginTests(unittest.TestCase):
             self.assertEqual(note.read_text(), "human knowledge")
             migration.apply(migration.inspect(self.vault, ROOT))
             self.assertEqual(projects.read_bytes(), project_bytes)
-            self.assertEqual((self.root / "codex/hooks.json").read_bytes(), old_hooks)
+            self.assertEqual(read_json(self.root / "codex/hooks.json"), installed_hooks)
+            migration.apply(migration.inspect(self.vault, ROOT))
+            self.assertEqual(read_json(self.root / "codex/hooks.json"), installed_hooks)
+            with patch.object(sys, 'argv', ['migrate_plugin.py', 'disable', '--vault-root', str(self.vault),
+                                           '--source-target', str(ROOT)]):
+                migration.main()
+            remaining = read_json(self.root / "codex/hooks.json")['hooks']
+            self.assertEqual(remaining['Stop'], json.loads(old_hooks)['hooks']['Stop'])
+            self.assertEqual(remaining['UserPromptSubmit'], [])
+            self.assertEqual(projects.read_bytes(), project_bytes)
+            migration.rollback(Path(plan["state_dir"]))
+            self.assertEqual(read_json(self.root / "codex/hooks.json"), installed_hooks)
+            self.assertEqual(projects.read_bytes(), project_bytes)
         self.assertTrue(any(c[:3] == ["codex", "plugin", "add"] for c in self.calls))
+        self.assertFalse(any('deploy' in c for c in self.calls))
+
+    def test_disable_does_not_bless_user_edits(self):
+        self.install_old()
+        plan = migration.inspect(self.vault, ROOT)
+        with patch.object(migration, "run", self.fake_run):
+            migration.apply(plan)
+            hooks = self.root / "codex/hooks.json"
+            installed = hooks.read_bytes()
+            hooks.write_text('{"hooks": {}, "user": true}')
+            with self.assertRaisesRegex(ValueError, "新修改"):
+                migration.disable(plan)
+            self.assertTrue(read_json(hooks)['user'])
+            hooks.write_bytes(installed)
+            migration.disable(plan)
+            hooks.write_text('{"hooks": {}, "user": true}')
+            with self.assertRaisesRegex(ValueError, "新修改"):
+                migration.rollback(Path(plan["state_dir"]))
+            self.assertTrue(read_json(hooks)['user'])
+
+    def test_interrupted_disable_can_roll_back(self):
+        self.install_old()
+        old_hooks = (self.root / "codex/hooks.json").read_bytes()
+        plan = migration.inspect(self.vault, ROOT)
+        with patch.object(migration, "run", self.fake_run):
+            migration.apply(plan)
+            def fail_remove(*args):
+                if args[:3] == ('codex', 'plugin', 'remove'):
+                    raise RuntimeError('interrupted')
+                self.fake_run(*args)
+            with patch.object(migration, "run", fail_remove), self.assertRaises(RuntimeError):
+                migration.disable(plan)
+            migration.rollback(Path(plan["state_dir"]))
+            self.assertEqual((self.root / "codex/hooks.json").read_bytes(), old_hooks)
 
     def test_rollback_does_not_overwrite_later_user_edit(self):
         self.install_old()

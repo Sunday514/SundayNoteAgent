@@ -174,6 +174,94 @@ class MonitorTests(unittest.TestCase):
         m.collect(self.vault, self.event('t2', 'maint', '同意调整'))
         self.assertEqual(len(self.state()['pending']), 1)
 
+    def wiki_targets(self, names=('方法',)):
+        pages = [f'知识库/P/{n}.md' for n in names]
+        for page in pages:
+            path = self.vault / page
+            path.parent.mkdir(parents=True, exist_ok=True)
+            if not path.exists():
+                path.write_text('方法与限制\n')
+        config = m.binding.read(m.binding.config_path())
+        config[str(self.vault)]['p']['wiki_targets'] = pages
+        m.binding.save(m.binding.config_path(), config)
+        return pages
+
+    def due(self):
+        state = self.state()
+        state['tidy'] = {'writes': 10, 'files': self.raw_files()}
+        m.binding.save(m.state_path(self.vault, 'p'), state)
+
+    def test_wiki_only_at_due_and_records_separately(self):
+        pages = self.wiki_targets()
+        batch, report = self.next_claim('ordinary')
+        self.assertEqual(report['wiki_targets'], [])
+        with self.assertRaises(ValueError):
+            m.complete(self.vault, 'p', batch, '越权', wiki_files=pages)
+        m.complete(self.vault, 'p', batch, '无增量')
+        self.due()
+        batch, report = self.next_claim('due')
+        self.assertEqual(report['wiki_targets'], pages)
+        m.complete(self.vault, 'p', batch, 'Wiki 更新，Raw 整理未完', wiki_files=pages, issue='待续')
+        state = self.state()
+        self.assertEqual(state['tidy']['writes'], 10)
+        self.assertEqual(state['results'][batch]['wiki_files'], pages)
+        self.assertEqual(state['results'][batch]['files'], [])
+        batch, report = self.next_claim('no-delta')
+        m.complete(self.vault, 'p', batch, '全部核对，无需修改', tidy_done=True)
+        self.assertFalse(m.tidy_status(self.state())['due'])
+
+    def test_wiki_snapshot_addition_and_revocation(self):
+        pages = self.wiki_targets()
+        self.due()
+        batch, report = self.next_claim('freeze')
+        added = self.wiki_targets(('方法', '另一页'))
+        self.assertEqual(m.claim(self.vault, 'p', batch)['wiki_targets'], pages)
+        with self.assertRaises(ValueError):
+            m.complete(self.vault, 'p', batch, '新增越权', wiki_files=added)
+        self.wiki_targets(())
+        self.assertEqual(m.claim(self.vault, 'p', batch)['wiki_targets'], [])
+        with self.assertRaises(ValueError):
+            m.complete(self.vault, 'p', batch, '撤销后写入', wiki_files=pages)
+        self.assertEqual(self.state()['active']['id'], batch)
+        m.complete(self.vault, 'p', batch, '授权撤销，未继续修改', issue='Wiki 未完成')
+        self.assertTrue(m.tidy_status(self.state())['due'])
+
+    def test_wiki_missing_symlink_and_legacy_claim(self):
+        self.due()
+        batch, report = self.next_claim('legacy')
+        self.assertEqual(report['wiki_targets'], [])
+        state = self.state()
+        del state['active']['wiki_targets']
+        m.binding.save(m.state_path(self.vault, 'p'), state)
+        pages = self.wiki_targets()
+        self.assertEqual(m.claim(self.vault, 'p', batch)['wiki_targets'], [])
+        m.complete(self.vault, 'p', batch, '旧批次只处理 Raw')
+        batch, report = self.next_claim('path')
+        target = self.vault / pages[0]
+        target.unlink()
+        with self.assertRaises(ValueError):
+            m.complete(self.vault, 'p', batch, '已删除', wiki_files=pages)
+        outside = self.root / 'outside.md'
+        outside.write_text('不可修改')
+        target.symlink_to(outside)
+        with self.assertRaises(ValueError):
+            m.claim(self.vault, 'p', batch)
+        with self.assertRaises(ValueError):
+            m.complete(self.vault, 'p', batch, '符号链接', wiki_files=pages)
+        self.assertEqual(outside.read_text(), '不可修改')
+
+    def test_wiki_complete_cli(self):
+        pages = self.wiki_targets()
+        self.due()
+        batch, _ = self.next_claim('cli')
+        result = subprocess.run([m.sys.executable, str(m.HERE), 'complete', '--vault-root',
+                                 str(self.vault), '--project-id', 'p', '--batch', batch,
+                                 '--result', 'Wiki 局部更新', '--wiki-file', pages[0], '--tidy-done'],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.state()['results'][batch]['wiki_files'], pages)
+        self.assertEqual(self.state()['tidy']['writes'], 0)
+
     def test_source_filters(self):
         for extra in ({'agent_id': 'child'}, {'transcript_path': ''}, {'cwd': str(self.root)}):
             self.assertIsNone(m.collect(self.vault, {**self.event(), **extra}))

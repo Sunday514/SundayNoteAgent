@@ -93,7 +93,8 @@ def run(*argv):
 def targets(vault, codex_home, config_dir, data_dir):
     return [config_dir / "config.json", config_dir / "install-mode", data_dir / "marketplace",
             data_dir / "monitor-runtime",
-            codex_home / "config.toml",
+            codex_home / "config.toml", codex_home / "hooks.json",
+            vault / ".import_files/sunday-note-agent/hook-command.json",
             vault / "AGENTS.md", vault / ".stignore", vault / "SundayNoteTools",
             vault / ".obsidian/daily-notes.json",
             vault / ".obsidian/plugins/calendar/data.json",
@@ -176,7 +177,7 @@ def apply(plan, paper=False, remote_app_id=None):
     prior = read_json(latest, {})
     if prior:
         old = read_json(Path(prior["transaction"]) / "journal.json")
-        if old["phase"] not in ("installed", "rolled_back"):
+        if old["phase"] not in ("installed", "disabled", "rolled_back"):
             raise ValueError("上次迁移未完成；先按 status 核查并 rollback，不覆盖检查点")
     previous = plan["binding"]
     options = {"paper": paper or previous.get("paper", False) or (vault / ".agents/skills/paper-summarizer").exists(),
@@ -204,9 +205,6 @@ def apply(plan, paper=False, remote_app_id=None):
             remove_owned(market)
             copy(staging, market)
         step(transaction, journal, "marketplace", publish_market, [market])
-        step(transaction, journal, "monitor-runtime", lambda: run(sys.executable,
-             source_target / "skills/sunday-note-monitor/scripts/monitor.py", "deploy", "--vault-root", vault),
-             [data_dir / "monitor-runtime"])
         binding = {"vault": str(vault), "source": str(source_target), "state_dir": str(state_dir),
                    "mode": plan["mode"], **options}
         step(transaction, journal, "binding", lambda: atomic(config_dir / "config.json", binding), [config_dir / "config.json"])
@@ -220,6 +218,10 @@ def apply(plan, paper=False, remote_app_id=None):
         codex_home.mkdir(parents=True, exist_ok=True)
         step(transaction, journal, "register-market", lambda: run("codex", "plugin", "marketplace", "add", market, "--json"), [codex_home / "config.toml"])
         step(transaction, journal, "register-plugin", lambda: run("codex", "plugin", "add", PLUGIN_ID, "--json"), [codex_home / "config.toml"])
+        step(transaction, journal, "return-hooks", lambda: run(sys.executable,
+             source_target / "skills/sunday-note-monitor/scripts/monitor.py", "install", "--vault-root", vault),
+             [codex_home / "hooks.json", vault / ".import_files/sunday-note-agent/hook-command.json",
+              data_dir / "monitor-runtime"])
         seal(transaction, journal, "installed")
     except BaseException:
         journal["phase"] = "interrupted"
@@ -272,6 +274,32 @@ def rollback(state_dir):
         print(f"中断期间的未确认内容已保留，请核查：{transaction / 'recovery'}（编号对应 journal entries 的 backup）")
 
 
+def disable(plan):
+    latest = read_json(Path(plan["state_dir"]) / "migration.json", {})
+    transaction = Path(latest["transaction"]) if latest else None
+    journal = read_json(transaction / "journal.json") if transaction else None
+    paths = [Path(plan["codex_home"]) / name for name in ("hooks.json", "config.toml")]
+    paths.append(Path(plan["vault"]) / ".import_files/sunday-note-agent/hook-command.json")
+    if journal:
+        if journal["phase"] not in ("installed", "disabled"):
+            raise ValueError("当前迁移状态不能停用；先核查并完成回退")
+        for entry in journal["entries"]:
+            if Path(entry["path"]) in paths and fingerprint(Path(entry["path"])) != entry["after"]:
+                raise ValueError(f"迁移后有新修改，先核查再停用：{entry['path']}")
+
+    def remove():
+        run(sys.executable, SOURCE / "skills/sunday-note-monitor/scripts/monitor.py", "uninstall",
+            "--vault-root", plan["vault"])
+        run("codex", "plugin", "remove", PLUGIN_ID)
+
+    if journal:
+        step(transaction, journal, "disable", remove, paths)
+        seal(transaction, journal, "disabled")
+    else:
+        remove()
+    print("插件与回流 Hook 已停用；项目绑定、历史、知识及其他工具配置保留。")
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("command", choices=("plan", "apply", "status", "rollback", "disable"))
@@ -297,8 +325,7 @@ def main():
     elif a.command == "rollback":
         rollback(Path(plan["state_dir"]))
     else:
-        run("codex", "plugin", "remove", PLUGIN_ID)
-        print("插件已卸载；知识、QuickAdd 与其他工具配置保留。")
+        disable(plan)
 
 
 if __name__ == "__main__":
