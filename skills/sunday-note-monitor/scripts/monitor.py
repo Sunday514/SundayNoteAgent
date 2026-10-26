@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """项目证据登记与维护会话交接；不判断内容、不编辑 Raw。"""
 import argparse
+from contextlib import nullcontext
+import fcntl
 import importlib.util
 import json
 import os
@@ -22,6 +24,7 @@ spec.loader.exec_module(binding)
 MARKER = '[SundayNote Evidence Return]'
 LIMIT = 256 * 1024
 TIDY_INTERVAL = 10
+DISPATCH_INTERVAL = 10 * 60
 
 
 def state_root(vault):
@@ -145,18 +148,46 @@ def collect(vault, event):
     return project if item['ready'] else None
 
 
-def dispatch(vault, project, runner=subprocess.run):
+def dispatch(vault, project, runner=subprocess.run, *, automatic=False):
+    # One detached waiter per project; collecting evidence never holds this lock.
+    path = binding.safe_path(state_path(vault, project).with_name('dispatch.lock'))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, 'w') as stream:
+        try:
+            fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return
+        owned = binding.safe_path(state_root(vault) / 'hook-command.json')
+        while True:
+            # Serialize automatic delivery with uninstall, but never lock while sleeping.
+            with binding.locked(owned) if automatic else nullcontext():
+                if automatic and (not owned.exists() or
+                                  not json.loads(owned.read_text()).get(str(vault))):
+                    return
+                delay = dispatch_ready(vault, project, runner)
+            if delay is None:
+                return
+            time.sleep(min(delay, 60))
+
+
+def dispatch_ready(vault, project, runner=subprocess.run):
     entry = selected(vault, project)
     path = state_path(vault, project)
     with binding.locked(path):
         state = load(path)
         if state['active'] or not any(i.get('ready') for i in state['pending'].values()):
             return
+        now = time.time()
+        last = state.get('last_dispatched_at')
+        if last is not None and now < last + DISPATCH_INTERVAL:
+            return last + DISPATCH_INTERVAL - now
         runtime = state.get('runtime')
         if not runtime:
             raise ValueError('未验收来源运行时，不能投递')
         batch = str(uuid.uuid4())
-        state['active'] = {'id': batch, 'status': 'sending', 'created_at': time.time()}
+        state['active'] = {'id': batch, 'status': 'sending', 'created_at': now}
+        state['last_dispatched_at'] = now
         binding.save(path, state)
     message = (f'{MARKER}\n请调用 $sunday-note-monitor 整理新增项目证据。'
                f'\nVault: {vault}\n项目: {project}\n批次: {batch}'
@@ -389,6 +420,7 @@ def main():
     parser.add_argument('--tidy-done', action='store_true')
     parser.add_argument('--codex')
     parser.add_argument('--confirm-stopped', action='store_true')
+    parser.add_argument('--automatic', action='store_true', help=argparse.SUPPRESS)
     args = parser.parse_args()
     vault = binding.safe_path(args.vault_root)
     try:
@@ -396,8 +428,8 @@ def main():
             event = json.loads(sys.stdin.read())
             project = collect(vault, event)
             if project:
-                # No model here. A short detached delivery avoids blocking the source turn.
-                subprocess.Popen([sys.executable, str(HERE), 'dispatch', '--vault-root', str(vault),
+                # No model here. Detached delivery may wait for the project cooldown.
+                subprocess.Popen([sys.executable, str(HERE), 'dispatch', '--automatic', '--vault-root', str(vault),
                                   '--project-id', project], stdin=subprocess.DEVNULL,
                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
             print('{"continue":true}')
@@ -411,7 +443,7 @@ def main():
             if args.command in ('enable', 'disable'):
                 configure(vault, args.project_id, args.command == 'enable', args.codex)
             elif args.command == 'dispatch':
-                dispatch(vault, args.project_id)
+                dispatch(vault, args.project_id, automatic=args.automatic)
             elif args.command == 'claim':
                 print(json.dumps(claim(vault, args.project_id, args.batch), ensure_ascii=False))
             elif args.command == 'complete':

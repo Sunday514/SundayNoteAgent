@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""登记本机项目来源与维护入口；不创建文档、不授予回流权限。"""
+"""登记本机项目来源与维护入口；完整首次接入可开启 Raw 回流，Wiki 名单独立授权，不创建文档。"""
 import argparse
 from contextlib import contextmanager
 import fcntl

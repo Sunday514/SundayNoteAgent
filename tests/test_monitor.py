@@ -25,6 +25,9 @@ class MonitorTests(unittest.TestCase):
             'XDG_DATA_HOME': str(self.root / 'data'),
             'CODEX_HOME': str(self.root / 'codex'), 'CODEX_THREAD_ID': 'maint'})
         self.env.start()
+        interval = patch.object(m, 'DISPATCH_INTERVAL', 0)
+        interval.start()
+        self.addCleanup(interval.stop)
         self.vault = self.root / 'vault'
         self.vault.mkdir()
         self.repo = self.root / 'repo'
@@ -351,6 +354,75 @@ class MonitorTests(unittest.TestCase):
         with ThreadPoolExecutor(max_workers=4) as pool:
             results = list(pool.map(lambda _: self.dispatch(), range(4)))
         self.assertEqual(sum(map(len, results)), 1)
+
+    def test_cooldown_accumulates_and_delivers_without_new_hook(self):
+        clock = [1000.0]
+        calls = []
+        def run(argv, **kw):
+            calls.append(clock[0])
+            return subprocess.CompletedProcess(argv, 0, '', '')
+        def sleep(seconds):
+            # Another Hook must not create another waiter or send early.
+            m.collect(self.vault, self.event('t3'))
+            m.dispatch(self.vault, 'p', run)
+            clock[0] += seconds
+        with patch.object(m, 'DISPATCH_INTERVAL', 600), \
+                patch.object(m.time, 'time', side_effect=lambda: clock[0]), \
+                patch.object(m.time, 'sleep', side_effect=sleep):
+            m.collect(self.vault, self.event())
+            m.dispatch(self.vault, 'p', run)
+            batch = self.state()['active']['id']
+            m.claim(self.vault, 'p', batch)
+            m.complete(self.vault, 'p', batch, '无增量')
+            clock[0] += 1
+            m.collect(self.vault, self.event('t2'))
+            m.dispatch(self.vault, 'p', run)
+            self.assertEqual(calls, [1000.0, 1600.0])
+            batch = self.state()['active']['id']
+            self.assertEqual(len(m.claim(self.vault, 'p', batch)['turns']), 2)
+
+    def test_disable_during_cooldown_preserves_pending(self):
+        m.collect(self.vault, self.event())
+        state = self.state()
+        state['last_dispatched_at'] = m.time.time()
+        m.binding.save(m.state_path(self.vault, 'p'), state)
+        def sleep(seconds):
+            m.configure(self.vault, 'p', False)
+        with patch.object(m, 'DISPATCH_INTERVAL', 600), \
+                patch.object(m.time, 'sleep', side_effect=sleep):
+            with self.assertRaises(ValueError):
+                self.dispatch()
+        self.assertIsNone(self.state()['active'])
+        self.assertIn('dev/t1', self.state()['pending'])
+
+    def test_uninstall_cancels_automatic_wait_but_preserves_manual_dispatch(self):
+        m.hooks(self.vault, True)
+        m.collect(self.vault, self.event())
+        state = self.state()
+        state['last_dispatched_at'] = m.time.time()
+        m.binding.save(m.state_path(self.vault, 'p'), state)
+        with patch.object(m, 'DISPATCH_INTERVAL', 600), \
+                patch.object(m.time, 'sleep', side_effect=lambda _: m.hooks(self.vault, False)), \
+                patch.object(m.subprocess, 'run') as run:
+            m.dispatch(self.vault, 'p', run, automatic=True)
+            run.assert_not_called()
+            # A delayed Hook subprocess starting after uninstall must also stop.
+            m.dispatch(self.vault, 'p', run, automatic=True)
+            run.assert_not_called()
+        self.assertIsNone(self.state()['active'])
+        self.assertIn('dev/t1', self.state()['pending'])
+        self.assertTrue(m.selected(self.vault, 'p')['raw_auto_enabled'])
+        self.assertEqual(len(self.dispatch()), 1)
+
+    def test_hook_marks_delivery_as_automatic(self):
+        import io
+        with patch.object(m.sys, 'argv', ['monitor', 'hook', '--vault-root', str(self.vault)]), \
+                patch.object(m.sys, 'stdin', io.StringIO(json.dumps(self.event()))), \
+                patch.object(m.sys, 'stdout', io.StringIO()), \
+                patch.object(m, 'collect', return_value='p'), \
+                patch.object(m.subprocess, 'Popen') as spawn:
+            m.main()
+        self.assertIn('--automatic', spawn.call_args.args[0])
 
     def test_worktree_identity(self):
         subprocess.run(['git', 'init', '-q', str(self.repo)], check=True)
