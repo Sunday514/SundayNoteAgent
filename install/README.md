@@ -46,6 +46,14 @@ python3 skills/sunday-note-project/scripts/project_binding.py unbind --vault-roo
 
 已接入项目可通过 Project 的[规则镜像](../skills/sunday-note-project/references/rule-mirror.md)提取根 AGENTS 与 `.agents/` 下的 Markdown，保存到 `项目维护/Agent规则/`。脚本随 Project 分发，不需要另配文件列表；显式运行才更新，保留版本清单、不覆盖人工修改、不调整设备同步范围。
 
+### 按需使用项目经验
+
+Project 提供 [Agent 接入约定模板](../skills/sunday-note-project/assets/Agent接入约定.md)，在获授权接入或更新时合入现有生效 Agent 文档，沿用总览中的 Raw／Wiki 入口；不直接修改其他已接入项目，不将规则镜像作为执行入口。模板由本仓库维护，项目位置在接入时填写。
+
+开发任务只在历史经验可能改变决策且当前信息不足时使用 Query，定位相关小节、判断适用性；简单任务无需查询，当前会话已读且条件未变时不重复读取。方法和来源的读取边界见 Query Skill。
+
+实际使用造成的行动变化与结果进入正常交付，既有 Monitor 回流到 Raw，Ingest 按证据修订 Wiki；不要求专门报告或每次使用都写入。上层 Skill／规则的采用仍按开发授权执行。模板生成、客户端加载、实际复用与收益分别验证；维护反馈依赖会话实际消费批次，不承诺后台及时完成。
+
 ## 文件职责
 
 | 位置 | 内容 |
