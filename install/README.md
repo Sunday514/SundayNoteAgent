@@ -72,16 +72,16 @@ QuickAdd 按现有 ID 更新本项目入口，保留用户 choices；个人模�
 
 Query、Ingest、Lint、Paper 通过环境工具在任务授权范围内工作，不依赖本机搜索脚本或授权配置。范围不明先确认；文件可见、链接与同步许可不等于读取授权。安装重建配置时不再保留已退出使用的字段。
 
-`.stignore` 由独立设备批准列表生成，读取许可不自动授予同步。配置位于 `$XDG_CONFIG_HOME/sunday-note-agent/sync-allowlist.json`，JSON 以 Vault 绝对路径为键、获批相对集合路径数组为值。项目、资料、Wiki 均批准到具体集合；更新不扩大范围。安全排除优先，最终 `*` 默认拒绝，已有用户规则保留在其后但不能绕过默认拒绝。
+`.stignore` 由独立设备批准列表生成，读取许可不自动授予同步。配置位于 `$XDG_CONFIG_HOME/sunday-note-agent/sync-allowlist.json`，JSON 以 Vault 绝对路径为键、获批相对路径数组为值。资料、记录、项目等内容可批准一级目录，也可保留更细范围；知识库必须批准具体主题或文件，不能批准整个 `知识库/`。安装更新保留批准范围，不自动把旧的子集合授权提升为一级目录。安全排除优先，最终 `*` 默认拒绝，已有用户规则保留在其后但不能绕过默认拒绝。
 
 ```bash
 python3 install/sync_allowlist.py list --vault-root /path/to/vault
-python3 install/sync_allowlist.py approve --vault-root /path/to/vault 工作项目/项目甲 工作资料/论文总结 工作记录 知识库/基础知识/Agent工程
-python3 install/sync_allowlist.py revoke --vault-root /path/to/vault 工作项目/项目甲
+python3 install/sync_allowlist.py approve --vault-root /path/to/vault 工作项目 工作资料 工作记录 知识库/基础知识/Agent工程
+python3 install/sync_allowlist.py revoke --vault-root /path/to/vault 工作项目
 python3 install/sync_allowlist.py render --vault-root /path/to/vault
 ```
 
-批准包含集合内新文件，但不包含新项目或新资料集合。`.obsidian` 只允许逐个批准 JSON 配置文件，不批准整个目录；凭据、插件数据和设备状态不默认同步，安全排除仍优先。空白名单会明确警告，恢复同步前须完成授权。引用不批准附件同步：设备未同步附件所属集合时，页面图片可能不可用。各设备独立批准与部署，不同步本机授权文件。
+批准目录后，其新增子目录和文件自动纳入；批准具体 Wiki 主题不会放行其他主题。`.obsidian` 只允许逐个批准 JSON 配置文件，不批准整个目录；凭据、插件数据和设备状态不默认同步，安全排除仍优先。空白名单会明确警告，恢复同步前须完成授权。附件保存在所属集合的 `assets/`，随该集合同步；跨集合引用不批准附件同步。各设备独立批准与部署，不同步本机授权文件。
 
 ## Vault 布局迁移
 

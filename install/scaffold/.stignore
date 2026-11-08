@@ -1,21 +1,38 @@
-// 工具源码由 Git 管理，导出工具在各设备本地安装。
-/SundayNoteAgent
-/.agents
-/AGENTS.md
-/.sunday-note-agent
+// 凭据、导入缓存、运行状态和依赖在各层级均排除，优先于内容放行。
 .git
-
-// 导入中间产物、凭据、设备配置和运行状态。
-/.import_files
-/.aws
-/.codex
-/.claude
-/.claudian
-/.logs
-/tmp
-/.trash
+.agents
+.aws
+.ssh
+.codex
+.claude
+.claudian
+.sunday-note-agent
+.import_files
+.logs
+.trash
+.stversions
+.env
+.env.*
+id_rsa
+id_ed25519
+credentials
+credentials.json
 __pycache__
 *.pyc
+.venv
+venv
+node_modules
+.DS_Store
+Thumbs.db
+
+// 工具、根规则和同步状态由各设备单独维护。
+/SundayNoteAgent
+/SundayNoteTools
+/AGENTS.md
+/CLAUDE.md
+/.stfolder
+/.stignore
+/tmp
 
 // 保留 Obsidian 可迁移设置，排除设备会话、启动器和索引缓存。
 /.obsidian/workspace.json

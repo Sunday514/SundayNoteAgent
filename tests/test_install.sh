@@ -85,7 +85,7 @@ for required_dir in \
   test -d "$vault/$required_dir" || fail "new vault is missing fixed directory: $required_dir"
 done
 assert_file_contains "$vault/.stignore" "/SundayNoteAgent"
-assert_file_contains "$vault/.stignore" "/.import_files"
+assert_file_contains "$vault/.stignore" '.import_files'
 assert_file_contains "$vault/.stignore" '// 其余全部忽略'
 { cat "$ROOT/install/scaffold/AGENTS.md"; printf '\n'; cat "$ROOT/install/scaffold/personal.md"; } > "$TMP_ROOT/personal-agents.md"
 assert_same_file "$TMP_ROOT/personal-agents.md" "$vault/AGENTS.md"
@@ -344,7 +344,7 @@ test ! -e "$vault/.agents/skills/sunday-note-lint/scripts/lint_headers.py" || fa
 assert_file_contains "$vault/.agents/skills/sunday-note-query/scripts/local.py" "local query helper"
 assert_file_contains "$vault/.stignore" "local ignore"
 assert_file_contains "$vault/.stignore" "/SundayNoteAgent"
-assert_file_contains "$vault/.stignore" "/.import_files"
+assert_file_contains "$vault/.stignore" '.import_files'
 test -f "$vault/.agents/skills/paper-summarizer/SKILL.md" || fail "optional skill was not installed"
 assert_local_content_unchanged
 assert_source_tree_exported "$ROOT/skills/sunday-note-ingest" "$vault/.agents/skills/sunday-note-ingest"
@@ -509,7 +509,7 @@ text = Path(sys.argv[1]).read_text()
 assert text.endswith(Path(sys.argv[2]).read_text())
 assert '!/工作项目' not in text
 for path in ('.import_files', '.logs'):
-    assert f'/{path}\n' in text
+    assert f'\n{path}\n' in text
 assert text.index('\n*\n') < text.index('!/个人资料/**')
 PY
 cp "$sync_vault/.stignore" "$TMP_ROOT/work-stignore"
@@ -522,7 +522,7 @@ import sys
 text = Path(sys.argv[1]).read_text()
 assert text.endswith(Path(sys.argv[2]).read_text())
 managed = text.split('// END SundayNoteAgent managed ignores')[0]
-assert '/.import_files' in managed
+assert '\n.import_files\n' in managed
 assert '/个人' not in managed and '/个人写作' not in managed
 PY
 

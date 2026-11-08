@@ -126,13 +126,18 @@ class LayoutTests(unittest.TestCase):
     def test_sync_default_deny_idempotent(self):
         sync.render(self.vault, [])
         self.assertNotIn("!/工作", (self.vault / ".stignore").read_text())
-        sync.render(self.vault, ["工作项目/A", "知识库/主题"])
+        approved = ["工作项目", "工作资料", "个人资料", "知识库/主题"]
+        sync.render(self.vault, approved)
         text = (self.vault / ".stignore").read_text()
-        sync.render(self.vault, ["工作项目/A", "知识库/主题"])
+        sync.render(self.vault, approved)
         self.assertEqual(text, (self.vault / ".stignore").read_text())
-        self.assertNotIn("!/工作项目/B", text)
-        self.assertLess(text.index("/.logs"), text.index("!/知识库"))
-        for invalid in ("知识库", "工作项目", "工作项目/", "./工作项目", "", ".", "../secret", "/tmp", "工作项目/*"):
+        for directory in ("工作项目", "个人项目", "工作资料", "个人资料", "工作记录", "个人记录", "个人写作"):
+            self.assertEqual(sync.collection(directory), directory)
+        self.assertIn("!/工作项目\n", text)
+        self.assertNotIn("!/知识库\n", text)
+        self.assertLess(text.index(".logs"), text.index("!/知识库"))
+        self.assertLess(text.index(".env"), text.index("!/工作资料"))
+        for invalid in ("知识库", "知识库/", "./知识库", "", ".", "../secret", "/tmp", "工作项目/*"):
             with self.assertRaises(ValueError):
                 sync.collection(invalid)
         self.assertEqual(sync.collection(".obsidian/daily-notes.json"), ".obsidian/daily-notes.json")

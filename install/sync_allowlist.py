@@ -22,8 +22,8 @@ def collection(value):
     checked = p.parts[1:] if obsidian_file else p.parts
     if not p.parts or p.is_absolute() or any(x in (".", "..") or x.startswith(".") for x in checked) or any(c in value for c in "\n\r*?![]{}\\"):
         raise ValueError("需要不含通配符的 Vault 相对集合路径")
-    if p.as_posix() in ("工作项目", "个人项目", "工作资料", "个人资料", "知识库"):
-        raise ValueError("项目、资料和 Wiki 必须批准具体集合，不可批准整个父目录")
+    if p.as_posix() == "知识库":
+        raise ValueError("知识库必须批准具体主题或文件，不可批准整个父目录")
     return p.as_posix()
 
 
