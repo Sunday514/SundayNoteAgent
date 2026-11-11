@@ -25,4 +25,4 @@ python3 scripts/project_binding.py unbind --vault-root /path/to/vault --project-
 
 多个仓库重复传入 `--source`；无代码来源的项目可不传。非 Git 来源传入明确目录。项目特有约定放总览，不复制根规则。证据记录区分用户决定、助手声明、实际验证与推断，不复制完整日志。
 
-用户明确批准到期 Wiki 维护时，用 `wiki-targets --vault-root <vault> --project-id <id> --page <知识库内已有页面.md>` 设置完整页面名单；多页重复 `--page`，撤销全部使用 `--clear`。先 `list` 核对并说明名单变化，不从文档链接推导授权。默认名单为空；只允许现存 Markdown 页面，不接受目录、通配符或符号链接。设置名单不启用 Monitor，不授予同步权限；Monitor 仅在到期批次使用领取时与当前仍获准的页面交集。
+用户明确批准持续 Wiki 维护时，用 `wiki-targets --vault-root <vault> --project-id <id> --page <知识库内已有页面.md>` 设置完整页面名单；多页重复 `--page`，撤销全部使用 `--clear`。先 `list` 核对并说明名单变化，不从文档链接推导授权。默认名单为空；只允许现存 Markdown 页面，不接受目录、通配符或符号链接。设置名单不启用 Monitor，不授予同步权限；Monitor 仅在有稳定知识增量或纠错线索时核对 Wiki，写入范围为领取时与当前仍获准的页面交集；名单不要求每批读取或修改。

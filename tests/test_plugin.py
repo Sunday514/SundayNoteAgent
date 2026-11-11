@@ -61,6 +61,8 @@ class PluginTests(unittest.TestCase):
             self.assertFalse((package / "skills/skill-validation").exists())
             self.assertEqual((package / "skills/sunday-note-query/SKILL.md").read_bytes(),
                              (ROOT / "skills/sunday-note-query/SKILL.md").read_bytes())
+            reference = Path("skills/sunday-note-ingest/references/wiki-maintenance.md")
+            self.assertEqual((package / reference).read_bytes(), (ROOT / reference).read_bytes())
             templates = Path("skills/sunday-note-project/assets/项目维护")
             for resource in ('scripts/mirror_rules.py', 'references/rule-mirror.md', 'assets/Agent接入约定.md'):
                 relative = Path('skills/sunday-note-project') / resource

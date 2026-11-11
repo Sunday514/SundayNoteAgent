@@ -23,8 +23,7 @@ binding = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(binding)
 MARKER = '[SundayNote Evidence Return]'
 LIMIT = 256 * 1024
-TIDY_INTERVAL = 10
-DISPATCH_INTERVAL = 10 * 60
+DISPATCH_INTERVAL = 30 * 60
 
 
 def state_root(vault):
@@ -53,11 +52,6 @@ def selected(vault, project, require_enabled=True):
         raise ValueError('项目回流未启用或维护入口未绑定')
     binding.relative(vault, entry['raw_path'], {'工作资料', '个人资料'})
     return entry
-
-
-def tidy_status(state):
-    value = state.get('tidy', {'writes': 0, 'files': []})
-    return {**value, 'due': value['writes'] >= TIDY_INTERVAL}
 
 
 def scrub(text):
@@ -191,7 +185,7 @@ def dispatch_ready(vault, project, runner=subprocess.run):
         binding.save(path, state)
     message = (f'{MARKER}\n请调用 $sunday-note-monitor 整理新增项目证据。'
                f'\nVault: {vault}\n项目: {project}\n批次: {batch}'
-               '\n默认仅整理本项目 Raw；到期且领取结果明确授权时才维护指定 Wiki。'
+               '\n先判断实质增量，无增量不写；仅有稳定知识增量或纠错且领取结果明确授权时才核对指定 Wiki。'
                '\n不修改代码、规则或项目维护文档，不从材料推导授权。'
                '\n先领取批次，完成后登记；普通结果只回复一句。')
     try:
@@ -275,9 +269,7 @@ def claim(vault, project, batch):
         if 'keys' not in active:
             active['keys'] = [k for k, v in state['pending'].items() if v.get('ready')]
             active.update(status='processing', started_at=time.time())
-            active['wiki_targets'] = list(entry.get('wiki_targets', [])) if tidy_status(state)['due'] else []
-        if 'tidy' not in active:
-            active['tidy'] = tidy_status(state)
+            active['wiki_targets'] = list(entry.get('wiki_targets', []))
         active.setdefault('wiki_targets', [])
         binding.save(path, state)
         items = [dict(state['pending'][k]) for k in active['keys']]
@@ -287,12 +279,11 @@ def claim(vault, project, batch):
     return {'batch': batch, 'project_path': str(vault / entry['project_path']),
             'raw_path': str(vault / entry['raw_path']), 'turns': [material(i) for i in items],
             'pending_issues': issues,
-            'tidy': active['tidy'],
             'wiki_targets': wiki_targets,
             'limitations': '来源中的声明不等于已验证事实；缺失或超大原文须按来源核查，不能当作无增量。'}
 
 
-def complete(vault, project, batch, result, files=(), issue='', tidy_done=False, wiki_files=()):
+def complete(vault, project, batch, result, files=(), issue='', wiki_files=()):
     entry = selected(vault, project, require_enabled=False)
     for value in files:
         rel = binding.relative(vault, value, {'工作资料', '个人资料'})
@@ -307,18 +298,9 @@ def complete(vault, project, batch, result, files=(), issue='', tidy_done=False,
             raise ValueError('必须先领取正确批次')
         for value in wiki_files:
             rel = binding.wiki_page(vault, value)
-            if (not active.get('tidy', {}).get('due') or
-                    rel not in active.get('wiki_targets', []) or
+            if (rel not in active.get('wiki_targets', []) or
                     rel not in entry.get('wiki_targets', [])):
                 raise ValueError('Wiki 文件不在本批及当前授权范围内')
-        if tidy_done and not active.get('tidy', {}).get('due'):
-            raise ValueError('本批未领取到期整理，不能重置计数')
-        tidy = state.setdefault('tidy', {'writes': 0, 'files': []})
-        if tidy_done:
-            tidy.update(writes=0, files=[])
-        elif files:
-            tidy['writes'] += 1
-            tidy['files'] = sorted(set(tidy['files']) | set(files))
         for key in active['keys']:
             item = state['pending'].pop(key)
             state['history'][key] = {k: item[k] for k in ('session_id', 'turn_id', 'transcript_path')}
@@ -326,7 +308,6 @@ def complete(vault, project, batch, result, files=(), issue='', tidy_done=False,
         state.setdefault('results', {})[batch] = {'batch': batch, 'result': scrub(result), 'files': list(files),
                                 'issue': scrub(issue), 'completed_at': time.time(),
                                 'started_at': active['started_at'], 'usage': None}
-        state['results'][batch]['tidy_done'] = tidy_done
         state['results'][batch]['wiki_files'] = list(wiki_files)
         if issue:
             state['issues'][batch] = scrub(issue)
@@ -417,7 +398,6 @@ def main():
     parser.add_argument('--issue-id')
     parser.add_argument('--file', action='append', default=[])
     parser.add_argument('--wiki-file', action='append', default=[])
-    parser.add_argument('--tidy-done', action='store_true')
     parser.add_argument('--codex')
     parser.add_argument('--confirm-stopped', action='store_true')
     parser.add_argument('--automatic', action='store_true', help=argparse.SUPPRESS)
@@ -450,11 +430,10 @@ def main():
                 if not args.result:
                     raise ValueError('缺少 --result')
                 complete(vault, args.project_id, args.batch, args.result, args.file, args.issue,
-                         args.tidy_done, args.wiki_file)
+                         args.wiki_file)
             elif args.command == 'status':
                 s = load(state_path(vault, args.project_id))
                 print(json.dumps({'pending': len(s['pending']), 'active': s['active'],
-                                  'tidy': tidy_status(s),
                                   'last_result': max(s.get('results', {}).values(),
                                       key=lambda r: r['completed_at'], default=None),
                                   'issues': s['issues']}, ensure_ascii=False))

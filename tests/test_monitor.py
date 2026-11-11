@@ -117,59 +117,6 @@ class MonitorTests(unittest.TestCase):
         batch = self.state()['active']['id']
         return batch, m.claim(self.vault, 'p', batch)
 
-    def test_tidy_counts_project_writes_not_turns_or_files(self):
-        files = self.raw_files()
-        batch, report = self.next_claim('empty')
-        m.complete(self.vault, 'p', batch, '无增量')
-        self.assertEqual(m.tidy_status(self.state())['writes'], 0)
-        for i in range(10):
-            batch, report = self.next_claim(str(i), 'dev' if i % 2 else 'dev2')
-            self.assertFalse(report['tidy']['due'])
-            m.complete(self.vault, 'p', batch, '合并事实', files)
-        self.assertEqual(m.tidy_status(self.state()), {'writes': 10, 'files': sorted(files), 'due': True})
-        with self.assertRaises(ValueError):
-            m.complete(self.vault, 'p', batch, '重复', files)
-        self.assertEqual(m.tidy_status(self.state())['writes'], 10)
-        batch, report = self.next_claim('tidy')
-        self.assertTrue(report['tidy']['due'])
-        m.collect(self.vault, self.event('later'))
-        self.assertEqual(m.claim(self.vault, 'p', batch)['tidy'], report['tidy'])
-        m.complete(self.vault, 'p', batch, '已合并同条件对照', files, tidy_done=True)
-        self.assertEqual(m.tidy_status(self.state()), {'writes': 0, 'files': [], 'due': False})
-        self.assertTrue(self.state()['results'][batch]['tidy_done'])
-        self.assertIn('dev/later', self.state()['pending'])
-        self.assertIsNone(self.state()['active'])
-
-    def test_tidy_incomplete_and_no_change_completion(self):
-        files = self.raw_files()
-        path = m.state_path(self.vault, 'p')
-        state = self.state()
-        state['tidy'] = {'writes': 10, 'files': files[:1]}
-        m.binding.save(path, state)
-        batch, _ = self.next_claim('partial')
-        m.complete(self.vault, 'p', batch, '回流完成，整理待续', files[1:], issue='人工内容冲突')
-        self.assertEqual(m.tidy_status(self.state())['writes'], 11)
-        self.assertEqual(set(self.state()['tidy']['files']), set(files))
-        batch, report = self.next_claim('resume')
-        self.assertTrue(report['tidy']['due'])
-        m.complete(self.vault, 'p', batch, '已核对，无需改动', tidy_done=True)
-        self.assertFalse(m.tidy_status(self.state())['due'])
-        self.assertEqual(self.state()['tidy']['files'], [])
-
-    def test_tidy_old_history_starts_zero_and_is_project_local(self):
-        path = m.state_path(self.vault, 'p')
-        state = self.state()
-        state['results'] = {str(i): {'files': ['工作资料/P/案例.md']} for i in range(20)}
-        m.binding.save(path, state)
-        batch, report = self.next_claim('first')
-        self.assertEqual(report['tidy'], {'writes': 0, 'files': [], 'due': False})
-        with self.assertRaises(ValueError):
-            m.complete(self.vault, 'p', batch, '未到期', tidy_done=True)
-        m.complete(self.vault, 'p', batch, '写入', self.raw_files())
-        self.assertEqual(m.tidy_status(self.state())['writes'], 1)
-        self.assertEqual(m.tidy_status(m.load(m.state_path(self.vault, 'other'))),
-                         {'writes': 0, 'files': [], 'due': False})
-
     def test_auto_turn_and_user_decision(self):
         m.collect(self.vault, self.event(session='maint', prompt=m.MARKER, event='UserPromptSubmit'))
         m.collect(self.vault, self.event(session='maint', prompt=''))
@@ -189,33 +136,22 @@ class MonitorTests(unittest.TestCase):
         m.binding.save(m.binding.config_path(), config)
         return pages
 
-    def due(self):
-        state = self.state()
-        state['tidy'] = {'writes': 10, 'files': self.raw_files()}
-        m.binding.save(m.state_path(self.vault, 'p'), state)
-
-    def test_wiki_only_at_due_and_records_separately(self):
+    def test_wiki_available_without_write_threshold_and_no_change(self):
         pages = self.wiki_targets()
-        batch, report = self.next_claim('ordinary')
-        self.assertEqual(report['wiki_targets'], [])
-        with self.assertRaises(ValueError):
-            m.complete(self.vault, 'p', batch, '越权', wiki_files=pages)
-        m.complete(self.vault, 'p', batch, '无增量')
-        self.due()
-        batch, report = self.next_claim('due')
+        batch, report = self.next_claim('first')
         self.assertEqual(report['wiki_targets'], pages)
-        m.complete(self.vault, 'p', batch, 'Wiki 更新，Raw 整理未完', wiki_files=pages, issue='待续')
-        state = self.state()
-        self.assertEqual(state['tidy']['writes'], 10)
-        self.assertEqual(state['results'][batch]['wiki_files'], pages)
-        self.assertEqual(state['results'][batch]['files'], [])
-        batch, report = self.next_claim('no-delta')
-        m.complete(self.vault, 'p', batch, '全部核对，无需修改', tidy_done=True)
-        self.assertFalse(m.tidy_status(self.state())['due'])
+        m.complete(self.vault, 'p', batch, '纠正方法', wiki_files=pages)
+        self.assertEqual(self.state()['results'][batch]['wiki_files'], pages)
+        self.assertEqual(self.state()['results'][batch]['files'], [])
+        batch, _ = self.next_claim('no-delta')
+        before = (self.vault / pages[0]).read_bytes()
+        m.complete(self.vault, 'p', batch, '无实质增量')
+        self.assertEqual(self.state()['results'][batch]['wiki_files'], [])
+        self.assertEqual((self.vault / pages[0]).read_bytes(), before)
+        self.assertNotIn('tidy', self.state())
 
     def test_wiki_snapshot_addition_and_revocation(self):
         pages = self.wiki_targets()
-        self.due()
         batch, report = self.next_claim('freeze')
         added = self.wiki_targets(('方法', '另一页'))
         self.assertEqual(m.claim(self.vault, 'p', batch)['wiki_targets'], pages)
@@ -227,10 +163,9 @@ class MonitorTests(unittest.TestCase):
             m.complete(self.vault, 'p', batch, '撤销后写入', wiki_files=pages)
         self.assertEqual(self.state()['active']['id'], batch)
         m.complete(self.vault, 'p', batch, '授权撤销，未继续修改', issue='Wiki 未完成')
-        self.assertTrue(m.tidy_status(self.state())['due'])
+        self.assertIn(batch, self.state()['issues'])
 
     def test_wiki_missing_symlink_and_legacy_claim(self):
-        self.due()
         batch, report = self.next_claim('legacy')
         self.assertEqual(report['wiki_targets'], [])
         state = self.state()
@@ -255,15 +190,14 @@ class MonitorTests(unittest.TestCase):
 
     def test_wiki_complete_cli(self):
         pages = self.wiki_targets()
-        self.due()
         batch, _ = self.next_claim('cli')
         result = subprocess.run([m.sys.executable, str(m.HERE), 'complete', '--vault-root',
                                  str(self.vault), '--project-id', 'p', '--batch', batch,
-                                 '--result', 'Wiki 局部更新', '--wiki-file', pages[0], '--tidy-done'],
+                                 '--result', 'Wiki 局部更新', '--wiki-file', pages[0]],
                                 capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.state()['results'][batch]['wiki_files'], pages)
-        self.assertEqual(self.state()['tidy']['writes'], 0)
+        self.assertNotIn('tidy', self.state())
 
     def test_source_filters(self):
         for extra in ({'agent_id': 'child'}, {'transcript_path': ''}, {'cwd': str(self.root)}):
@@ -366,7 +300,7 @@ class MonitorTests(unittest.TestCase):
             m.collect(self.vault, self.event('t3'))
             m.dispatch(self.vault, 'p', run)
             clock[0] += seconds
-        with patch.object(m, 'DISPATCH_INTERVAL', 600), \
+        with patch.object(m, 'DISPATCH_INTERVAL', 1800), \
                 patch.object(m.time, 'time', side_effect=lambda: clock[0]), \
                 patch.object(m.time, 'sleep', side_effect=sleep):
             m.collect(self.vault, self.event())
@@ -377,7 +311,7 @@ class MonitorTests(unittest.TestCase):
             clock[0] += 1
             m.collect(self.vault, self.event('t2'))
             m.dispatch(self.vault, 'p', run)
-            self.assertEqual(calls, [1000.0, 1600.0])
+            self.assertEqual(calls, [1000.0, 2800.0])
             batch = self.state()['active']['id']
             self.assertEqual(len(m.claim(self.vault, 'p', batch)['turns']), 2)
 
@@ -388,7 +322,7 @@ class MonitorTests(unittest.TestCase):
         m.binding.save(m.state_path(self.vault, 'p'), state)
         def sleep(seconds):
             m.configure(self.vault, 'p', False)
-        with patch.object(m, 'DISPATCH_INTERVAL', 600), \
+        with patch.object(m, 'DISPATCH_INTERVAL', 1800), \
                 patch.object(m.time, 'sleep', side_effect=sleep):
             with self.assertRaises(ValueError):
                 self.dispatch()
@@ -401,7 +335,7 @@ class MonitorTests(unittest.TestCase):
         state = self.state()
         state['last_dispatched_at'] = m.time.time()
         m.binding.save(m.state_path(self.vault, 'p'), state)
-        with patch.object(m, 'DISPATCH_INTERVAL', 600), \
+        with patch.object(m, 'DISPATCH_INTERVAL', 1800), \
                 patch.object(m.time, 'sleep', side_effect=lambda _: m.hooks(self.vault, False)), \
                 patch.object(m.subprocess, 'run') as run:
             m.dispatch(self.vault, 'p', run, automatic=True)
