@@ -84,6 +84,7 @@ def collect(vault, event):
         payload = meta['payload']
         if (meta['type'] != 'session_meta' or payload.get('id') != event['session_id'] or
                 payload.get('source') not in ('cli', 'vscode') or payload.get('ephemeral') or
+                payload.get('attached_thread') or
                 payload.get('thread_source') in ('side_chat', 'side_conversation', 'ephemeral')):
             return None
     except (OSError, ValueError, KeyError):

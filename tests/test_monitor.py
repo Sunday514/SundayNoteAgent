@@ -212,17 +212,22 @@ class MonitorTests(unittest.TestCase):
         base = {'id': 'dev', 'source': 'cli'}
         for change in ({'source': None}, {'source': 'unknown'}, {'source': {'subagent': {}}},
                        {'ephemeral': True}, {'thread_source': 'side_chat'},
-                       {'thread_source': 'side_conversation'}, {'thread_source': 'ephemeral'}):
+                       {'thread_source': 'side_conversation'}, {'thread_source': 'ephemeral'},
+                       {'source': 'vscode', 'thread_source': 'user', 'attached_thread': True,
+                        'forked_from_id': 'parent'}):
             p.write_text(json.dumps({'type': 'session_meta', 'payload': {**base, **change}}) + '\n')
-            self.assertIsNone(m.collect(self.vault, e), change)
+            for event in ('UserPromptSubmit', 'Stop'):
+                self.assertIsNone(m.collect(self.vault, {**e, 'hook_event_name': event}), change)
         p.write_text(json.dumps({'type': 'session_meta', 'payload': base}) + '\n')
         outside = self.root / 'ephemeral.jsonl'
         outside.write_text(p.read_text())
         self.assertIsNone(m.collect(self.vault, {**e, 'transcript_path': str(outside)}))
         self.assertFalse(self.state()['pending'])
-        p.write_text(json.dumps({'type': 'session_meta', 'payload': {
-            **base, 'source': 'vscode', 'thread_source': 'agent_created_thread'}}) + '\n')
-        self.assertEqual(m.collect(self.vault, e), 'p')
+        for change in ({'thread_source': 'agent_created_thread'},
+                       {'thread_source': 'user', 'attached_thread': False, 'forked_from_id': 'parent'}):
+            p.write_text(json.dumps({'type': 'session_meta', 'payload': {
+                **base, 'source': 'vscode', **change}}) + '\n')
+            self.assertEqual(m.collect(self.vault, e), 'p')
 
     def test_uncertain_not_resent(self):
         m.collect(self.vault, self.event())
